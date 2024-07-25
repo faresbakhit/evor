@@ -1,0 +1,9 @@
+# Hello, world!
+
+fun add(a: int, b: int) -> int {
+	return a + b;
+}
+
+fun main() {
+	var 騎士 = 0b1111;
+}
