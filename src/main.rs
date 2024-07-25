@@ -10,8 +10,7 @@ use machine::lexer::Lexer;
 fn read_tokens(mut file: impl Read) -> io::Result<()> {
     let mut buf = String::new();
     file.read_to_string(&mut buf)?;
-    let bytes = buf.as_bytes();
-    for token in Lexer::new(bytes) {
+    for token in Lexer::new(buf.as_str()) {
         println!(
             "{:?} [{:?}) ({:?})",
             token.kind,

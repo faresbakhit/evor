@@ -5,13 +5,13 @@ use crate::token::TokenKind;
 use ErrorKind::*;
 
 pub struct Parser<'source> {
-    pub buf: &'source [u8],
+    pub buf: &'source str,
     tokens: Lexer<'source>,
     ctx_span: Span,
 }
 
 impl<'source> Parser<'source> {
-    pub fn new(buf: &'source [u8]) -> Parser<'source> {
+    pub fn new(buf: &'source str) -> Parser<'source> {
         Parser {
             buf,
             tokens: Lexer::new(buf),
