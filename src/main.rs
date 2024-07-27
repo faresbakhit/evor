@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::{
     env,
     fs::File,
@@ -21,7 +23,7 @@ fn read_tokens(mut file: impl Read) -> io::Result<()> {
     Ok(())
 }
 
-fn main() -> ExitCode {
+fn file_main() -> ExitCode {
     let res = match env::args_os().nth(1) {
         Some(path) if path.as_os_str() == "-" => read_tokens(stdin()),
         Some(path) => match File::open(path) {
@@ -35,4 +37,12 @@ fn main() -> ExitCode {
     };
     res.unwrap();
     ExitCode::SUCCESS
+}
+
+fn main() {
+    use machine::parser::Parser;
+
+    // (+ (+ 1 (* 2 (* 3 fares))) 6)
+    let mut parser = Parser::new("((((1))))");
+    println!("{:#?}", parser.parse_expr().unwrap());
 }

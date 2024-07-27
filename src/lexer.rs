@@ -46,14 +46,6 @@ impl Lexer<'_> {
         iter.next()
     }
 
-    fn second_eq(&self, ch: char) -> bool {
-        self.second() == Some(ch)
-    }
-
-    fn third_eq(&self, ch: char) -> bool {
-        self.third() == Some(ch)
-    }
-
     fn bump_while(&mut self, mut predicate: impl FnMut(char) -> bool) {
         while let Some(c) = self.first() {
             if !predicate(c) {
@@ -67,7 +59,7 @@ impl Lexer<'_> {
         self.rem - self.chars.as_str().len()
     }
 
-    fn reset(&mut self) {
+    fn flush(&mut self) {
         let len = self.chars.as_str().len();
         self.pos += self.rem - len;
         self.rem = len
@@ -84,8 +76,8 @@ impl Lexer<'_> {
                 self.bump_while(is_digit_continue);
                 matches!(self.first(), Some('e' | 'E'))
             }
-            Some('E') | Some('e') => true,
-            _ => return Integer(Base::Decimal),
+            Some('E' | 'e') => true,
+            _ => return Int(Base::Decimal),
         };
 
         if parse_expo {
@@ -93,10 +85,10 @@ impl Lexer<'_> {
             match self.first() {
                 Some('+' | '-') => {
                     self.bump();
-                    match self.first() {
-                        Some(c) if is_digit_continue(c) => self.bump_while(is_digit_continue),
-                        _ => return FloatNoExpo,
+                    if !self.first().is_some_and(is_digit_continue) {
+                        return FloatNoExpo;
                     }
+                    self.bump_while(is_digit_continue);
                 }
                 Some(c) if is_digit_continue(c) => self.bump_while(is_digit_continue),
                 _ => return FloatNoExpo,
@@ -112,7 +104,7 @@ impl Iterator for Lexer<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         macro_rules! bump {
-            [$n:expr, $kind:expr] => {
+            [$n:expr; $kind:expr] => {
                 {
                     for _ in 0..$n { self.bump(); }
                     ($n, $kind)
@@ -122,93 +114,108 @@ impl Iterator for Lexer<'_> {
 
         let c = loop {
             match self.first()? {
-                '#' => self.bump_while(|c| c != '\n'),
-                c if c.is_whitespace() => self.bump_while(|c| c.is_whitespace()),
+                '#' => {
+                    self.bump_while(|c| c != '\n');
+                    self.bump(); // '\n'
+                }
+                c if c.is_whitespace() => {
+                    self.bump_while(|c| c.is_whitespace());
+                }
                 c => break c,
             }
         };
 
-        self.reset();
+        self.flush();
 
-        let (len, kind) = match c {
-            '<' if self.second_eq('<') && self.third_eq('=') => bump![3, ShiftLeftEqual],
-            '>' if self.second_eq('>') && self.third_eq('=') => bump![3, ShiftRightEqual],
-            ':' if self.second_eq(':') => bump![2, DoubleColon],
-            '<' if self.second_eq('<') => bump![2, ShiftLeft],
-            '>' if self.second_eq('>') => bump![2, ShiftRight],
-            '>' if self.second_eq('=') => bump![2, GreaterEqual],
-            '<' if self.second_eq('=') => bump![2, LessEqual],
-            '=' if self.second_eq('=') => bump![2, EqualEqual],
-            '!' if self.second_eq('=') => bump![2, NotEqual],
-            '+' if self.second_eq('=') => bump![2, PlusEqual],
-            '-' if self.second_eq('=') => bump![2, MinusEqual],
-            '*' if self.second_eq('=') => bump![2, StarEqual],
-            '/' if self.second_eq('=') => bump![2, SlashEqual],
-            '%' if self.second_eq('=') => bump![2, PercentEqual],
-            '^' if self.second_eq('=') => bump![2, CaretEqual],
-            '&' if self.second_eq('=') => bump![2, AmperEqual],
-            '|' if self.second_eq('=') => bump![2, BarEqual],
-            '-' if self.second_eq('>') => bump![2, Arrow],
-            '<' => bump![1, Less],
-            '>' => bump![1, Greater],
-            '=' => bump![1, Equal],
-            '!' => bump![1, Not],
-            '+' => bump![1, Plus],
-            '-' => bump![1, Minus],
-            '*' => bump![1, Star],
-            '/' => bump![1, Slash],
-            '%' => bump![1, Percent],
-            '^' => bump![1, Caret],
-            '&' => bump![1, Amper],
-            '|' => bump![1, Bar],
-            '(' => bump![1, OpenParen],
-            ')' => bump![1, CloseParen],
-            '{' => bump![1, OpenBrace],
-            '}' => bump![1, CloseBrace],
-            '~' => bump![1, Tilde],
-            ':' => bump![1, Colon],
-            ',' => bump![1, Comma],
-            ';' => bump![1, Semicolon],
-            c if is_ident_start(c) => {
+        let (len, kind) = match (c, self.second(), self.third()) {
+            ('<', Some('<'), Some('=')) => bump![3; ShiftLeftEqual],
+            ('>', Some('>'), Some('=')) => bump![3; ShiftRightEqual],
+            (':', Some(':'), _) => bump![2; DoubleColon],
+            ('&', Some('&'), _) => bump![2; AndAnd],
+            ('|', Some('|'), _) => bump![2; BarBar],
+            ('<', Some('<'), _) => bump![2; ShiftLeft],
+            ('>', Some('>'), _) => bump![2; ShiftRight],
+            ('>', Some('='), _) => bump![2; GreaterEqual],
+            ('<', Some('='), _) => bump![2; LessEqual],
+            ('=', Some('='), _) => bump![2; EqualEqual],
+            ('!', Some('='), _) => bump![2; NotEqual],
+            ('+', Some('='), _) => bump![2; PlusEqual],
+            ('-', Some('='), _) => bump![2; MinusEqual],
+            ('*', Some('='), _) => bump![2; StarEqual],
+            ('/', Some('='), _) => bump![2; SlashEqual],
+            ('%', Some('='), _) => bump![2; PercentEqual],
+            ('^', Some('='), _) => bump![2; CaretEqual],
+            ('&', Some('='), _) => bump![2; AndEqual],
+            ('|', Some('='), _) => bump![2; BarEqual],
+            ('-', Some('>'), _) => bump![2; Arrow],
+            ('<', _, _) => bump![1; Less],
+            ('>', _, _) => bump![1; Greater],
+            ('=', _, _) => bump![1; Equal],
+            ('!', _, _) => bump![1; Not],
+            ('+', _, _) => bump![1; Plus],
+            ('-', _, _) => bump![1; Minus],
+            ('*', _, _) => bump![1; Star],
+            ('/', _, _) => bump![1; Slash],
+            ('%', _, _) => bump![1; Percent],
+            ('^', _, _) => bump![1; Caret],
+            ('&', _, _) => bump![1; And],
+            ('|', _, _) => bump![1; Bar],
+            ('(', _, _) => bump![1; OpenParen],
+            (')', _, _) => bump![1; CloseParen],
+            ('{', _, _) => bump![1; OpenBrace],
+            ('}', _, _) => bump![1; CloseBrace],
+            ('~', _, _) => bump![1; Tilde],
+            (':', _, _) => bump![1; Colon],
+            (',', _, _) => bump![1; Comma],
+            (';', _, _) => bump![1; Semicolon],
+            (c, _, _) if is_ident_start(c) => {
                 self.bump_while(is_ident_continue);
-                (self.bumped(), Identifier)
+                (self.bumped(), Ident)
             }
-            c if is_digit_start(c) => {
-                let mut kind = match self.second() {
-                    Some('b' | 'B') => {
+            (c, _, _) if is_digit_start(c) => 'number: {
+                if c != '0' {
+                    let kind = self.next_number();
+                    let bumped = self.bumped();
+                    break 'number (bumped, kind);
+                }
+
+                let base = match self.second() {
+                    Some('B' | 'b') => {
                         self.bump();
                         self.bump();
                         self.bump_while(is_binary_digit);
-                        Integer(Base::Binary)
+                        Base::Binary
                     }
-                    Some('o' | 'O') => {
+                    Some('O' | 'o') => {
                         self.bump();
                         self.bump();
                         self.bump_while(is_octal_digit);
-                        Integer(Base::Octal)
+                        Base::Octal
                     }
-                    Some('x' | 'X') => {
+                    Some('X' | 'x') => {
                         self.bump();
                         self.bump();
                         self.bump_while(is_hexadecimal_digit);
-                        Integer(Base::Hexadecimal)
+                        Base::Hexadecimal
                     }
-                    _ => self.next_number(),
+                    _ => {
+                        let kind = self.next_number();
+                        let bumped = self.bumped();
+                        break 'number (bumped, kind);
+                    }
                 };
 
                 let bumped = self.bumped();
 
-                if let Integer(base) = kind {
-                    if bumped == 2 {
-                        kind = IntegerNoDigits(base);
-                    } else {
-                        kind = Integer(base);
-                    }
+                let kind = if bumped == 2 {
+                    Int(base)
+                } else {
+                    IntNoDigits(base)
                 };
 
                 (bumped, kind)
             }
-            _ => bump![1, Unknown],
+            _ => bump![1; Unknown],
         };
 
         let span = Span::new(self.pos as u32, (self.pos + len) as u32);

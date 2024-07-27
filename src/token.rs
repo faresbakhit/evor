@@ -29,7 +29,7 @@ pub enum TokenKind {
     /// "^"
     Caret,
     /// "&"
-    Amper,
+    And,
     /// "|"
     Bar,
     /// "("
@@ -51,6 +51,10 @@ pub enum TokenKind {
 
     /// "::"
     DoubleColon,
+    /// "&&"
+    AndAnd,
+    /// "||"
+    BarBar,
     /// "<<"
     ShiftLeft,
     /// ">>"
@@ -76,7 +80,7 @@ pub enum TokenKind {
     /// "^="
     CaretEqual,
     /// "&="
-    AmperEqual,
+    AndEqual,
     /// "|="
     BarEqual,
     /// "->"
@@ -87,51 +91,20 @@ pub enum TokenKind {
     /// ">>="
     ShiftRightEqual,
 
-    /// "fn"
-    Fn,
-    /// "mod"
-    Mod,
-    /// "struct"
-    Struct,
-    /// "var"
-    Var,
-    /// "if"
-    If,
-    /// "else"
-    Else,
-    /// "for"
-    For,
-    /// "break"
-    Break,
-    /// "continue"
-    Continue,
-    /// "defer"
-    Defer,
-    /// "return"
-    Return,
-
     /// "an_id3ntifier"
-    Identifier,
+    Ident,
     /// "0b101", "50", "0o764", "0x1388"
-    Integer(Base),
+    Int(Base),
     /// "0b", "0o", "0x"
-    IntegerNoDigits(Base),
+    IntNoDigits(Base),
     /// "3.11e1", "14E+2", "3.0", "271.8e-2"
     Float,
     /// "314.1e-", "55e"
     FloatNoExpo,
     /// "'\x08'", "'\x16'", "'('", "'8'"
-    Character,
+    Char,
     /// ""\n\tThis is was\r\n\twritten by a \"Human\" 🤖\n""
     String,
-    /// "b'\''", "b'\0'", b"' '", "b'\n'"
-    ByteCharacter,
-    /// "b"GET / HTTP/1.1""
-    ByteString,
-    /// "true"
-    True,
-    /// "false"
-    False,
 
     // Unknwon token.
     Unknown,

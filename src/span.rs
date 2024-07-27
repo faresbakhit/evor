@@ -1,3 +1,4 @@
+use core::cmp::Ordering;
 use core::fmt;
 use core::ops::{Bound, Index, IndexMut, Range, RangeBounds};
 
@@ -10,6 +11,18 @@ pub struct Span {
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Span({:?}..{:?})", self.start, self.end)
+    }
+}
+
+impl PartialOrd for Span {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.len().partial_cmp(&other.len())
+    }
+}
+
+impl Ord for Span {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.len().cmp(&other.len())
     }
 }
 
@@ -33,6 +46,20 @@ impl Span {
 
     pub const fn as_range(&self) -> Range<usize> {
         self.start as usize..self.end as usize
+    }
+
+    pub const fn join(&self, other: &Span) -> Span {
+        let start = if self.start < other.start {
+            self.start
+        } else {
+            other.start
+        };
+        let end = if self.start > other.start {
+            self.start
+        } else {
+            other.start
+        };
+        Span { start, end }
     }
 }
 
