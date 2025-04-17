@@ -1,8 +1,0 @@
-[package]
-name = "machine"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-string-interner = { version = "0.17.0", default-features = false, features = ["backends", "inline-more"] }
-unicode-xid = "0.2.4"
