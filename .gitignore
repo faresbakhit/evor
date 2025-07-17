@@ -1,16 +1,3 @@
-.dub
-docs.json
-__dummy.html
 docs/
 /evorc
-evorc.so
-evorc.dylib
-evorc.dll
-evorc.a
-evorc.lib
-evorc-test-*
-*.exe
-*.pdb
-*.o
-*.obj
-*.lst
+/evorc-unittest

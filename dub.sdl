@@ -1,5 +1,0 @@
-name "evorc"
-description "An x86-64 compiler for Evor, a C-like programming language."
-authors "Fares A. Bakhit"
-copyright "Copyright © 2025, Fares A. Bakhit"
-license "BSD-4-Clause"
