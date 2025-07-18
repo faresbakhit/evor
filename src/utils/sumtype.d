@@ -59,7 +59,7 @@ unittest
  * Extracts the first field from a `SumType` assuming all underlying types
  * share the same first field type and layout.
  */
-auto firstField(SumType)(auto ref SumType sumType)
+auto ref firstField(SumType)(auto ref SumType sumType)
 {
     static if (isPointer!SumType)
         return firstFieldImpl(*sumType);
@@ -81,11 +81,11 @@ unittest
     assert(b.firstField == 456);
 }
 
-private auto firstFieldImpl(SumType)(auto ref SumType sumType)
+private auto ref firstFieldImpl(SumType)(auto ref SumType sumType)
 if (isSumType!SumType && SumType.Types.length > 0 && allSameFirstType!SumType)
 {
-    import std.conv : bitCast;
-    return sumType.bitCast!(FirstTypeOf!(SumType.Types[0]));
+    alias First = FirstTypeOf!(SumType.Types[0]);
+    return *cast(First*)(&sumType);
 }
 
 private alias allSameFirstType(SumType) = allSameType!(staticMap!(FirstTypeOf, SumType.Types));
@@ -96,7 +96,7 @@ private template FirstTypeOf(Tuple)
     static if (isTuple!Tuple)
         alias FirstTypeOf = Tuple.Types[0];
     else static if (__traits(compiles, Tuple.tupleof))
-        alias FirstTypeOf = typeof(T.tupleof[0]);
+        alias FirstTypeOf = typeof(Tuple.tupleof[0]);
     else
         alias FirstTypeOf = Tuple;
 }

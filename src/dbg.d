@@ -6,12 +6,20 @@ mixin Debug!(
     // evorc.tok
     "Bool", evorc.tok.Bool,
     "Int", evorc.tok.Int,
-    "Ident", "Unknown", "Eof",
+    "Ident", evorc.tok.Ident,
+    "Unknown", "Eof",
     // evorc.ast
-    "FuncDecl", "Var", "Pointer", "Primitive", "Param", "Func", "If",
-    "Return", "VarDecl", "Assign", "Un", "Bin", "Call",
+    "FuncDecl", "Pointer", "Primitive", "Param", "Func", "If", "Return",
+    "VarDecl", "Assign", "Un", "Bin", "Call",
+    "Ident", evorc.ast.Ident,
     "Bool", evorc.ast.Bool,
     "Int", evorc.ast.Int,
+    "Err", evorc.ast.Err,
+    // evorc.lin
+    "LinFuncDecl", "LinParam", "LinFunc", "LinIf", "LinAssign", "LinReturn",
+    "LinVar", "LinPointer", "LinUn", "LinBin", "LinCall",
+    "LinBool", "LinInt", "Deref",
+    "Err", evorc.lin.Err,
 );
 
 import std;

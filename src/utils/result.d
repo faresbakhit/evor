@@ -1,8 +1,6 @@
 module evorc.utils.result;
 
-import std.algorithm.mutation : move;
-import std.traits : isCopyable;
-import std.exception : enforce;
+import std.traits;
 
 /**
  * Also called a "Failable" type but naming it `Result` is more
@@ -10,21 +8,24 @@ import std.exception : enforce;
  */
 struct Result(T, E)
 {
+    alias Ok = T;
+    alias Err = E;
+
     private bool _isErr;
 
     private union
     {
-        T _ok;
-        E _err;
+        Ok _ok;
+        Err _err;
     }
 
-    this(T ok)
+    this(Ok ok)
     {
         _isErr = false;
         _ok = ok;
     }
 
-    this(E err)
+    this(Err err)
     {
         _isErr = true;
         _err = err;
@@ -35,19 +36,14 @@ struct Result(T, E)
         return _isErr;
     }
 
-    @property bool isOk() const @safe pure nothrow
-    {
-        return !_isErr;
-    }
-
-    @property ref inout(T) get() inout pure nothrow
+    @property ref inout(Ok) get() inout pure nothrow
     {
         enum message = "Called `get' on error Result!(" ~ T.stringof ~ ", " ~ E.stringof ~ ").";
         assert(!_isErr, message);
         return _ok;
     }
 
-    @property ref inout(E) err() inout pure nothrow
+    @property ref inout(Err) err() inout pure nothrow
     {
         enum message = "Called `err' on non-error Result!(" ~ T.stringof ~ ", " ~ E.stringof ~ ").";
         assert(_isErr, message);
@@ -79,6 +75,15 @@ struct Result(T, E)
     }
 }
 
+
+/**
+ * Create a [Result] template with `E` as the error type.
+ */
+template ResultWith(E)
+{
+    alias ResultWith(T) = Result!(T, E);
+}
+
 /**
  * Wrap an ok value in a [Result].
  *
@@ -89,17 +94,59 @@ struct Result(T, E)
  * auto result(T)(Err err) => Result!T(err);
  * ---
  */
-auto result(T, E)(T ok) => Result!(T, E)(_ok);
+auto result(T, E)(T ok) => Result!(T, E)(ok);
 
 /**
  * Wrap an error value in a [Result].
  */
-auto result(T, E)(E err) => Result!(T, E)(_err);
+auto result(T, E)(E err) => Result!(T, E)(err);
 
 /**
- * Create a [Result] template with `E` as the error type.
- */
-template ResultWith(E)
+  * Collect `Ok` values from a range of `Result`s into a single `Result`.
+  *
+  * Iteration proceeds left‑to‑right. On the first `Err`, return that error
+  * immediately. If no error is seen, return `Ok` with an array of all
+  * successful payloads.
+  *
+  * Params:
+  *     r  = input range whose element type is `Result!(T, E)`
+  *
+  * Returns: `Result!(T[], E)`
+  */
+Result!(ForeachType!Range.Ok[], ForeachType!Range.Err) collect(Range)(Range r)
+if (isIterable!(Range) && isInstanceOf!(Result, ForeachType!Range))
 {
-    alias ResultWith(T) = Result!(T, E);
+    import std.array : appender;
+    alias R = ForeachType!Range;
+    auto a = appender!(R.Ok[])();
+    foreach (e; r)
+    {
+        if (e.isErr)
+            return Result!(R.Ok[], R.Err)(e.err);
+        a.put(e.get);
+    }
+    return Result!(R.Ok[], R.Err)(a.data);
+}
+
+///
+unittest
+{
+    import std.algorithm;
+    import std.conv;
+
+    Result!(int, string) parse(string s)
+    {
+        try {
+            return to!int(s).result!(int, string);
+        } catch (ConvException) {
+            return "error: bad value".result!(int, string);
+        }
+    }
+
+    auto r1 = ["1", "2", "3"].map!parse.result;
+    assert(!r1.isErr);
+    assert(r1.get == [1, 2, 3]);
+
+    auto r2 = ["1", "a", "3"].map!parse.result;
+    assert(r2.isErr);
 }

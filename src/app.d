@@ -14,6 +14,14 @@ void main(string[] args)
     source
         .tokenize
         .parse
-        .dbg
-        .writeln;
+        .match!(
+            (Program prog)
+            {
+                prog.lin.dbg.writeln;
+            },
+            (evorc.ast.Err err)
+            {
+                err.dbg.writeln;
+            },
+        );
 }

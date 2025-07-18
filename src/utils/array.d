@@ -50,4 +50,3 @@ unittest
     assert(sameHead(slice2ToN, slice2));
     assert(sameTail(slice2ToN, sliceN));
 }
-
