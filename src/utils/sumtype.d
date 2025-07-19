@@ -11,9 +11,16 @@ import std.traits;
  * The types must match exactly, without implicit conversions.
  */
 bool contains(T, SumType)(auto ref SumType sumType, auto ref T value)
-if (isSumType!SumType)
+if (isSumType!SumType || (isPointer!SumType && isSumType!(PointerTarget!SumType)))
 {
-    return sumType.has!T && sumType.get!T == value;
+    static if (isPointer!SumType)
+    {
+        return (*sumType).contains(value);
+    }
+    else
+    {
+        return sumType.has!T && sumType.get!T == value;
+    }
 
     // One can also write,
     //
