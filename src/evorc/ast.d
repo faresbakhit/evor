@@ -125,9 +125,8 @@ if (isTokRange!Range)
     Program prog;
     while (!toks.front.has!Eof)
     {
-        auto item = parseProgramItem(toks);
-        if (item.isErr) return item.err.result!T;
-        prog ~= item.get;
+        auto item = parseProgramItem(toks)?;
+        prog ~= item;
     }
     return prog.result;
 }
@@ -136,19 +135,16 @@ private Result!ProgramItem parseProgramItem(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
     alias T = ProgramItem;
-    auto retType = parseType(toks);
-    if (retType.isErr) return retType.err.result!T;
-    auto ident = parseIdent(toks);
-    if (ident.isErr) return ident.err.result!T;
-    auto params = parseParams(toks);
+    auto retType = parseType(toks)?;
+    auto ident = parseIdent(toks)?;
+    auto params = parseParams(toks)?;
     auto declEndSpan = toks.pop.span;
-    if (params.isErr) return params.err.result!T;
-    auto decl = FuncDecl(retType.get.span.joinSpans(declEndSpan), ident.get, retType.get, params.get);
+    auto declSpan = retType.span.joinSpans(declEndSpan);
+    auto decl = FuncDecl(declSpan, ident, retType, params);
     if (toks.nextIf!";")
         return ProgramItem(decl).result;
-    auto block = parseBlock(toks);
-    if (block.isErr) return block.err.result!T;
-    return ProgramItem(Func(decl, block.get)).result;
+    auto block = parseBlock(toks)?;
+    return ProgramItem(Func(decl, block)).result;
 }
 
 private Result!(Type*) parseType(Range)(auto ref Range toks)
@@ -185,16 +181,14 @@ if (isTokRange!Range)
     if (!err.isNull) return err.get.result!T;
     if (toks.nextIs!")") return [].result!T;
     Param[] params;
-    auto p = parseParam(toks);
-    if (p.isErr) return p.err.result!T;
-    params ~= p.get;
+    auto p = parseParam(toks)?;
+    params ~= p;
     while (!toks.nextIs!")")
     {
         err = toks.expect!",";
         if (!err.isNull) return Err("expected `,` or `)`, found %s", err.get.tok).result!T;
-        p = parseParam(toks);
-        if (p.isErr) return p.err.result!T;
-        params ~= p.get;
+        p = parseParam(toks)?;
+        params ~= p;
     }
     return params.result;
 }
@@ -203,13 +197,12 @@ private Result!Param parseParam(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
     alias T = Param;
-    auto type = parseType(toks);
-    if (type.isErr) return type.err.result!T;
+    auto type = parseType(toks)?;
     if (!toks.front.has!IdentTok)
-        return Param(type.get.span, type.get, Nullable!Ident.init).result;
-    auto ident = parseIdent(toks);
-    if (ident.isErr) return ident.err.result!T;
-    return Param(type.get.span.joinSpans(ident.get.span), type.get, ident.get.nullable).result;
+        return Param(type.span, type, Nullable!Ident.init).result;
+    auto ident = parseIdent(toks)?;
+    auto span = type.span.joinSpans(ident.span);
+    return Param(span, type, ident.nullable).result;
 }
 
 private Result!Block parseBlock(Range)(auto ref Range toks)
@@ -221,9 +214,8 @@ if (isTokRange!Range)
     Block block;
     while (!toks.nextIf!"}")
     {
-        auto stmt = parseStmt(toks);
-        if (stmt.isErr) return stmt.err.result!T;
-        block ~= stmt.get;
+        auto stmt = parseStmt(toks)?;
+        block ~= stmt;
     }
     return block.result;
 }
@@ -240,46 +232,39 @@ if (isTokRange!Range)
     {
         // auto err = toks.expect!"(";
         // if (!err.isNull) return err.get.result!T;
-        auto cond = parseExpr(toks);
-        if (cond.isErr) return cond.err.result!T;
+        auto cond = parseExpr(toks)?;
         // err = toks.expect!")";
         // if (!err.isNull) return err.get.result!T;
         Block ifBlock;
         if (toks.nextIs!"{") {
-            auto res = parseBlock(toks);
-            if (res.isErr) return res.err.result!T;
-            ifBlock = res.get;
+            ifBlock = parseBlock(toks)?;
         } else {
-            auto stmt = parseStmt(toks);
-            if (stmt.isErr) return stmt.err.result!T;
-            ifBlock = [stmt.get];
+            auto stmt = parseStmt(toks)?;
+            ifBlock = [stmt];
         }
         if (toks.nextIf!"else")
         {
             Block elseBlock;
             if (toks.nextIs!"{") {
-                auto res = parseBlock(toks);
-                if (res.isErr) return res.err.result!T;
-                elseBlock = res.get;
+                elseBlock = parseBlock(toks)?;
             } else {
-                auto stmt = parseStmt(toks);
-                if (stmt.isErr) return stmt.err.result!T;
-                elseBlock = [stmt.get];
+                auto stmt = parseStmt(toks)?;
+                elseBlock = [stmt];
             }
-            return result(new Stmt(If(cond.get, ifBlock, elseBlock)));
+            return result(new Stmt(If(cond, ifBlock, elseBlock)));
         }
-        return result(new Stmt(If(cond.get, ifBlock, [])));
+        return result(new Stmt(If(cond, ifBlock, [])));
     }
     if (toks.nextIs!"return")
     {
         auto retSpan = toks.pop.span;
         if (toks.nextIf!";")
             return result(new Stmt(Return(retSpan, NullableRef!Expr.init)));
-        auto expr = parseExpr(toks);
-        if (expr.isErr) return expr.err.result!T;
+        auto expr = parseExpr(toks)?;
         auto err = toks.expect!";";
         if (!err.isNull) return err.get.result!T;
-        return result(new Stmt(Return(retSpan.joinSpans(expr.get.span), expr.get.nullableRef)));
+        auto span = retSpan.joinSpans(expr.span);
+        return result(new Stmt(Return(span, expr.nullableRef)));
     }
     Stmt* stmt;
     Range toksSave = toks.save;
@@ -287,22 +272,20 @@ if (isTokRange!Range)
     if (varDecl.isErr)
     {
         toks = toksSave;
-        auto lhs = parseExpr(toks);
-        if (lhs.isErr) return lhs.err.result!T;
+        auto lhs = parseExpr(toks)?;
         if (toks.front.has!Sym)
         {
             auto assignMod = assignMod(toks.front.get!Sym);
             if (!assignMod.isNull)
             {
                 toks.popFront;
-                auto rhs = parseExpr(toks);
-                if (rhs.isErr) return rhs.err.result!T;
-                auto span = lhs.get.span.joinSpans(rhs.get.span);
-                stmt = new Stmt(Assign(span, assignMod.get, lhs.get, rhs.get));
+                auto rhs = parseExpr(toks)?;
+                auto span = lhs.span.joinSpans(rhs.span);
+                stmt = new Stmt(Assign(span, assignMod.get, lhs, rhs));
                 goto expectSemicolon;
             }
         }
-        stmt = new Stmt(lhs.get.nullableRef);
+        stmt = new Stmt(lhs.nullableRef);
         goto expectSemicolon;
     }
     stmt = new Stmt(varDecl.get);

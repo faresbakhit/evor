@@ -1,4 +1,4 @@
-module app;
+module evorc.main;
 
 import evorc;
 import std;

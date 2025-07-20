@@ -289,34 +289,28 @@ Result!LinExpr lin(Un un, ref LinBlock block, ref VarRecord rec)
         (Bool bool_)
         {
             auto exprType = new LinType(PrimitiveType.bool_);
-            auto unExprType = un.op.on(exprType, un.span);
-            if (unExprType.isErr) return unExprType.err.result!T;
-            return LinExpr(LinUn(unExprType.get, un.op, Atom(LinBool(exprType, bool_.value)))).result;
+            auto unExprType = un.op.on(exprType, un.span)?;
+            return LinExpr(LinUn(unExprType, un.op, Atom(LinBool(exprType, bool_.value)))).result;
         },
         (Int int_)
         {
             auto exprType = new LinType(PrimitiveType.int_);
-            auto unExprType = un.op.on(exprType, un.span);
-            if (unExprType.isErr) return unExprType.err.result!T;
-            return LinExpr(LinUn(unExprType.get, un.op, Atom(LinInt(exprType, int_.value)))).result;
+            auto unExprType = un.op.on(exprType, un.span)?;
+            return LinExpr(LinUn(unExprType, un.op, Atom(LinInt(exprType, int_.value)))).result;
         },
         (Ident ident)
         {
-            auto var = rec.get(ident);
-            if (var.isErr) return var.err.result!T;
-            auto type = un.op.on(var.get.type, un.span);
-            if (type.isErr) return type.err.result!T;
-            return LinExpr(LinUn(type.get, un.op, Atom(var.get))).result;
+            auto var = rec.get(ident)?;
+            auto type = un.op.on(var.type, un.span)?;
+            return LinExpr(LinUn(type, un.op, Atom(var))).result;
         },
         (_)
         {
-            auto expr = lin(un.expr, block, rec);
-            if (expr.isErr) return expr.err.result!T;
-            auto var = rec.next(type(expr.get));
-            auto type = un.op.on(var.type, un.span);
-            if (type.isErr) return type.err.result!T;
-            block ~= new LinStmt(LinAssign(LValue(var), expr.get));
-            return LinExpr(LinUn(type.get, un.op, Atom(var))).result;
+            auto expr = lin(un.expr, block, rec)?;
+            auto var = rec.next(type(expr));
+            auto type = un.op.on(var.type, un.span)?;
+            block ~= new LinStmt(LinAssign(LValue(var), expr));
+            return LinExpr(LinUn(type, un.op, Atom(var))).result;
         }
     );
 }
@@ -328,67 +322,39 @@ Result!LinExpr lin(Bin bin, ref LinBlock block, ref VarRecord rec)
     bool rhsIsAtomic = bin.rhs.isAtomic();
     if (lhsIsAtomic && rhsIsAtomic)
     {
-        auto rLeft = bin.lhs.atom(rec);
-        if (rLeft.isErr) return rLeft.err.result!T;
-        auto left = rLeft.get;
-
-        auto rRight = bin.rhs.atom(rec);
-        if (rRight.isErr) return rRight.err.result!T;
-        auto right = rRight.get;
-
-        auto type = bin.op.on(left.type, right.type, bin.lhs.span, bin.rhs.span);
-        if (type.isErr) return type.err.result!T;
-        return LinExpr(LinBin(type.get, bin.op, left, right)).result;
+        auto left = bin.lhs.atom(rec)?;
+        auto right = bin.rhs.atom(rec)?;
+        auto type = bin.op.on(left.type, right.type, bin.lhs.span, bin.rhs.span)?;
+        return LinExpr(LinBin(type, bin.op, left, right)).result;
     }
     else if (lhsIsAtomic)
     {
-        auto rLeft = bin.lhs.atom(rec);
-        if (rLeft.isErr) return rLeft.err.result!T;
-        auto left = rLeft.get;
-
-        auto rRightExpr = lin(bin.rhs, block, rec);
-        if (rRightExpr.isErr) return rRightExpr.err.result!T;
-        auto rightExpr = rRightExpr.get;
+        auto left = bin.lhs.atom(rec)?;
+        auto rightExpr = lin(bin.rhs, block, rec)?;
         auto rightVar = rec.next(rightExpr.type);
         block ~= new LinStmt(LinAssign(LValue(rightVar), rightExpr));
-
-        auto type = bin.op.on(left.type, rightVar.type, bin.lhs.span, bin.rhs.span);
-        if (type.isErr) return type.err.result!T;
-        return LinExpr(LinBin(type.get, bin.op, left, Atom(rightVar))).result;
+        auto type = bin.op.on(left.type, rightVar.type, bin.lhs.span, bin.rhs.span)?;
+        return LinExpr(LinBin(type, bin.op, left, Atom(rightVar))).result;
     }
     else if (rhsIsAtomic)
     {
-        auto rLeftExpr = lin(bin.lhs, block, rec);
-        if (rLeftExpr.isErr) return rLeftExpr.err.result!T;
-        auto leftExpr = rLeftExpr.get;
+        auto leftExpr = lin(bin.lhs, block, rec)?;
         auto leftVar = rec.next(leftExpr.type);
         block ~= new LinStmt(LinAssign(LValue(leftVar), leftExpr));
-
-        auto rRight = bin.rhs.atom(rec);
-        if (rRight.isErr) return rRight.err.result!T;
-        auto right = rRight.get;
-
-        auto type = bin.op.on(right.type, leftVar.type, bin.lhs.span, bin.rhs.span);
-        if (type.isErr) return type.err.result!T;
-        return LinExpr(LinBin(type.get, bin.op, Atom(leftVar), right)).result;
+        auto right = bin.rhs.atom(rec)?;
+        auto type = bin.op.on(right.type, leftVar.type, bin.lhs.span, bin.rhs.span)?;
+        return LinExpr(LinBin(type, bin.op, Atom(leftVar), right)).result;
     }
     else
     {
-        auto rLeftExpr = lin(bin.lhs, block, rec);
-        if (rLeftExpr.isErr) return rLeftExpr.err.result!T;
-        auto leftExpr = rLeftExpr.get;
+        auto leftExpr = lin(bin.lhs, block, rec)?;
         auto leftVar = rec.next(leftExpr.type);
         block ~= new LinStmt(LinAssign(LValue(leftVar), leftExpr));
-
-        auto rRightExpr = lin(bin.rhs, block, rec);
-        if (rRightExpr.isErr) return rRightExpr.err.result!T;
-        auto rightExpr = rRightExpr.get;
+        auto rightExpr = lin(bin.rhs, block, rec)?;
         auto rightVar = rec.next(rightExpr.type);
         block ~= new LinStmt(LinAssign(LValue(rightVar), rightExpr));
-
-        auto type = bin.op.on(rightVar.type, leftVar.type, bin.lhs.span, bin.rhs.span);
-        if (type.isErr) return type.err.result!T;
-        return LinExpr(LinBin(type.get, bin.op, Atom(leftVar), Atom(rightVar))).result;
+        auto type = bin.op.on(rightVar.type, leftVar.type, bin.lhs.span, bin.rhs.span)?;
+        return LinExpr(LinBin(type, bin.op, Atom(leftVar), Atom(rightVar))).result;
     }
 }
 

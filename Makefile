@@ -1,24 +1,23 @@
 DMD = dmd
 
-SRCS = $(shell find src -name '*.d')
+SRC = $(shell find src/evorc -name '*.d')
+SRCPP = $(SRC:src/evorc/%.d=build/evorc/%.d)
 
-# DFLAGS = -O -inline -release
 DFLAGS = -g -debug
 
-evorc: $(SRCS)
+all: evorc
+
+evorc: $(SRCPP)
 	$(DMD) $(DFLAGS) -of=$@ $^
 
-evorc-unittest: $(SRCS)
+evorc-unittest: $(SRCPP)
 	$(DMD) $(DFLAGS) -unittest -of=evorc-unittest $^
 
-.PHONY: test
-test: evorc-unittest
-	./evorc-unittest
+build/evorc/%.d: src/evorc/%.d dpp build/evorc/utils
+	./dpp -o $@ $<
 
-.PHONY: docs
-docs: $(SRCS)
-	$(DMD) $(DFLAGS) -D -Dd=$@ $^
+dpp: dpp.d
+	$(DMD) $(DFLAGS) -of=$@ $^
 
-.PHONY: clean
-clean:
-	rm -f evorc evorc-unittest
+build/evorc/utils:
+	mkdir -p build/evorc/utils
