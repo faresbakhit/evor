@@ -6,42 +6,55 @@ import std;
 import std.uni : isWhite;
 import core.exception;
 
-auto funcRegex = ctRegex!`(?:private\s)Result!\(?(.*?)\)?\s`;
+auto funcRegex = ctRegex!`^(?:private\s)?Result!\(?(.*?)\)?\s`;
 
 void preprocess(Input, Output)(Input lineReader, Output textWriter)
 {
     ulong i = 0;
+    string currType = "T";
     foreach (line; lineReader)
     {
         auto s = line.strip();
-        if (!s.endsWith(`?;`))
+        if (s.endsWith(`?;`))
         {
-            textWriter.put(line);
-            continue;
+            char[] v, vMaybe;
+            if (s.startsWith(`auto`))
+            {
+                auto vStart = s.countUntil!isWhite + 1;
+                auto vEnd = vStart + s[vStart..$].countUntil!(x => x == '=' || isWhite(x));
+                v = `auto ` ~ s[vStart..vEnd];
+                vMaybe = s[vStart..vEnd] ~ `MaybeDpp` ~ to!string(++i);
+            }
+            else
+            {
+                auto vEnd = s.countUntil!isWhite;
+                v = s[0..vEnd];
+                vMaybe = v ~ `MaybeDpp` ~ to!string(++i);
+            }
+            auto eStart = s.countUntil('=') + 1;
+            auto eEnd = s.countUntil('?');
+            auto e = s[eStart..eEnd];
+            textWriter.put(
+                `auto ` ~ vMaybe ~ `=` ~ e ~ `;`
+                ~ `if (` ~ vMaybe ~ `.isErr()) { return ` ~ vMaybe ~ `.err.result!(` ~ currType ~ `); }`
+                ~ v ~ `=` ~ vMaybe ~ `.get;` ~ '\n'
+            );
         }
-        char[] v, vMaybe;
-        if (s.startsWith(`auto`))
+        else if (s.endsWith(`result;`))
         {
-            auto vStart = s.countUntil!isWhite + 1;
-            auto vEnd = vStart + s[vStart..$].countUntil!(x => x == '=' || isWhite(x));
-            v = `auto ` ~ s[vStart..vEnd];
-            vMaybe = s[vStart..vEnd] ~ `MaybeDpp` ~ to!string(++i);
+            auto end = `result;`;
+            textWriter.put(s[0..($-end.length)] ~ `result!(` ~ currType ~ ");\n");
         }
         else
         {
-            auto vEnd = s.countUntil!isWhite;
-            v = s[0..vEnd];
-            vMaybe = v ~ `MaybeDpp` ~ to!string(++i);
+            auto captures = matchFirst(s, funcRegex);
+            if (captures.length == 2)
+            {
+                currType = captures[1].idup;
+            }
+            textWriter.put(line);
+            continue;
         }
-        auto eStart = s.countUntil('=') + 1;
-        auto eEnd = s.countUntil('?');
-        auto e = s[eStart..eEnd];
-        textWriter.put(
-            `auto ` ~ vMaybe ~ `=` ~ e ~ `;`
-            ~ `if (` ~ vMaybe ~ `.isErr()) { return ` ~ vMaybe ~ `.err.result!T; }`
-            ~ v ~ `=` ~ vMaybe ~ `.get;` ~ '\n'
-        );
-        
     }
 }
 

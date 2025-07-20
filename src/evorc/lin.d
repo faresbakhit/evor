@@ -70,12 +70,10 @@ Result!LinProgram lin(Program prog)
 
 Result!LinProgramItem lin(Func fn)
 {
-    alias T = LinProgramItem;
     VarRecord rec;
     auto fnDecl = lin(fn.decl, rec);
-    auto block = lin(fn.block, rec);
-    if (block.isErr) return block.err.result!T;
-    return LinProgramItem(LinFunc(fnDecl, block.get)).result;
+    auto block = lin(fn.block, rec)?;
+    return LinProgramItem(LinFunc(fnDecl, block)).result;
 }
 
 Result!LinProgramItem lin(FuncDecl fnDecl)
@@ -109,12 +107,10 @@ LinType* lin(Type* type) => (*type).match!(
 
 Result!LinBlock lin(Block block, ref VarRecord rec)
 {
-    alias T = LinBlock;
     LinBlock linBlock;
     foreach (stmt; block)
     {
-        auto res = lin(stmt, linBlock, rec);
-        if (res.isErr) return res.err.result!T;
+        auto res = lin(stmt, linBlock, rec)?;
     }
     return linBlock.result;
 }
@@ -126,66 +122,48 @@ Result!Unit lin(Stmt* stmt, ref LinBlock block, ref VarRecord rec)
 
 Result!Unit lin(If if_, ref LinBlock block, ref VarRecord rec)
 {
-    alias T = Unit;
-    auto exprEx = lin(if_.cond, block, rec);
-    if (exprEx.isErr) return exprEx.err.result!T;
-    auto expr = exprEx.get;
+    auto expr = lin(if_.cond, block, rec)?;
     auto exprType = expr.type;
     if (!exprType.contains(PrimitiveType.bool_))
-        return Err("expected `bool`, found `%s`".format(display(exprType)), if_.cond.span).result!T;
-    auto ifBlock = lin(if_.ifBlock, rec);
-    if (ifBlock.isErr) return ifBlock.err.result!T;
-    auto elseBlock = lin(if_.elseBlock, rec);
-    if (elseBlock.isErr) return elseBlock.err.result!T;
-    block ~= new LinStmt(LinIf(expr, ifBlock.get, elseBlock.get));
+        return Err("expected `bool`, found `%s`".format(display(exprType)), if_.cond.span).result;
+    auto ifBlock = lin(if_.ifBlock, rec)?;
+    auto elseBlock = lin(if_.elseBlock, rec)?;
+    block ~= new LinStmt(LinIf(expr, ifBlock, elseBlock));
     return unit.result;
 }
 
 Result!Unit lin(Return ret, ref LinBlock block, ref VarRecord rec)
 {
-    alias T = Unit;
     if (ret.expr.isNull) return unit.result;
-    auto expr = lin(ret.expr.bitCast!(Expr*), block, rec);
-    if (expr.isErr) return expr.err.result!T;
-    block ~= new LinStmt(LinReturn(expr.get.nullable));
+    auto expr = lin(ret.expr.bitCast!(Expr*), block, rec)?;
+    block ~= new LinStmt(LinReturn(expr.nullable));
     return unit.result;
 }
 
 Result!Unit lin(VarDecl varDecl, ref LinBlock block, ref VarRecord rec)
 {
-    alias T = Unit;
     auto var = rec.put(varDecl.ident.name, lin(varDecl.type));
     if (varDecl.def.isNull) return unit.result;
     auto def = varDecl.def.bitCast!(Expr*);
-    auto maybeExpr = lin(def, block, rec);
-    if (maybeExpr.isErr) return maybeExpr.err.result!T;
-    auto expr = maybeExpr.get;
+    auto expr = lin(def, block, rec)?;
     if (!expr.type.equalTo(var.type))
         return Err("`%s` not assignable to `%s`"
                    .format(expr.type.display, var.type.display), def.span)
-               .result!T;
+               .result;
     block ~= new LinStmt(LinAssign(LValue(var), expr));
     return unit.result;
 }
 
 Result!Unit lin(Assign assign, ref LinBlock block, ref VarRecord rec)
 {
-    alias T = Unit;
     auto lhsExpr = *assign.lhs;
     if (lhsExpr.has!Ident)
     {
-        auto maybeVar = rec.get(lhsExpr.get!Ident);
-        if (maybeVar.isErr) return maybeVar.err.result!T;
-        auto var = maybeVar.get;
-
-        auto maybeExpr = lin(assign.rhs, block, rec);
-        if (maybeExpr.isErr) return maybeExpr.err.result!T;
-        auto expr = maybeExpr.get;
-
+        auto var = rec.get(lhsExpr.get!Ident)?;
+        auto expr = lin(assign.rhs, block, rec)?;
         if (!var.type.equalTo(expr.type)) return Err("`%s` not assignable to `%s`"
                                                      .format(expr.type.display, var.type.display), assign.rhs.span)
-                                                 .result!T;
-
+                                                 .result;
         block ~= new LinStmt(LinAssign(LValue(var), expr));
     }
     else if (lhsExpr.has!Un && lhsExpr.get!Un.op == UnOp.pointerDereference)
@@ -193,71 +171,51 @@ Result!Unit lin(Assign assign, ref LinBlock block, ref VarRecord rec)
         auto lhsDerefExpr = *lhsExpr.get!Un.expr;
         if (lhsDerefExpr.has!Ident)
         {
-            auto maybeVar = rec.get(lhsDerefExpr.get!Ident);
-            if (maybeVar.isErr) return maybeVar.err.result!T;
-            auto var = maybeVar.get;
-
+            auto var = rec.get(lhsDerefExpr.get!Ident)?;
             if (!(*var.type).has!LinPointer)
                 return Err("dereference of primitive type `%s`"
                            .format(var.type.display), assign.lhs.span)
-                       .result!T;
-
-            auto maybeExpr = lin(assign.rhs, block, rec);
-            if (maybeExpr.isErr) return maybeExpr.err.result!T;
-            auto expr = maybeExpr.get;
-
+                       .result;
+            auto expr = lin(assign.rhs, block, rec)?;
             auto pointeeType = (*var.type).get!LinPointer.pointee;
             if (!pointeeType.equalTo(expr.type))
                 return Err("`%s` not assignable to `%s`"
                            .format(expr.type.display, pointeeType.display), assign.rhs.span)
-                       .result!T;
-
+                       .result;
             block ~= new LinStmt(LinAssign(LValue(Deref(var)), expr));
         }
         else
         {
-            auto maybeTempExpr = lin(lhsExpr.get!Un.expr, block, rec);
-            if (maybeTempExpr.isErr) return maybeTempExpr.err.result!T;
-            auto tempExpr = maybeTempExpr.get;
-
+            auto tempExpr = lin(lhsExpr.get!Un.expr, block, rec)?;
             auto var = rec.next(tempExpr.type);
             block ~= new LinStmt(LinAssign(LValue(var), tempExpr));
-
             if (!(*var.type).has!LinPointer)
                 return Err("dereference of primitive type `%s`"
                            .format(var.type.display), assign.lhs.span)
-                       .result!T;
-
-            auto maybeExpr = lin(assign.rhs, block, rec);
-            if (maybeExpr.isErr) return maybeExpr.err.result!T;
-            auto expr = maybeExpr.get;
-
+                       .result;
+            auto expr = lin(assign.rhs, block, rec)?;
             auto pointeeType = (*var.type).get!LinPointer.pointee;
             if (!pointeeType.equalTo(expr.type))
                 return Err("`%s` not assignable to `%s`"
                            .format(expr.type.display, pointeeType.display), assign.rhs.span)
-                       .result!T;
-
+                       .result;
             block ~= new LinStmt(LinAssign(LValue(Deref(var)), expr));
         }
     }
     else
     {
-        return Err("expression is not assignable", assign.lhs.span).result!T;
+        return Err("expression is not assignable", assign.lhs.span).result;
     }
     return unit.result;
 }
 
 Result!Unit lin(StmtExpr stmtExpr, ref LinBlock block, ref VarRecord rec)
 {
-    alias T = Unit;
     if (stmtExpr.isNull) return unit.result;
-    auto expr = lin(stmtExpr.bitCast!(Expr*), block, rec);
-    if (expr.isErr) return expr.err.result!T;
-    block ~= new LinStmt(expr.get);
+    auto expr = lin(stmtExpr.bitCast!(Expr*), block, rec)?;
+    block ~= new LinStmt(expr);
     return unit.result;
 }
-
 
 Result!LinExpr lin(Expr* expr, ref LinBlock block, ref VarRecord rec)
 {
@@ -276,15 +234,12 @@ Result!LinExpr lin(Int int_, ref LinBlock block, ref VarRecord rec)
 
 Result!LinExpr lin(Ident ident, ref LinBlock block, ref VarRecord rec)
 {
-    alias T = LinExpr;
-    auto var = rec.get(ident);
-    if (var.isErr) return var.err.result!T;
-    return LinExpr(var.get).result;
+    auto var = rec.get(ident)?;
+    return LinExpr(var).result;
 }
 
 Result!LinExpr lin(Un un, ref LinBlock block, ref VarRecord rec)
 {
-    alias T = LinExpr;
     return (*un.expr).match!(
         (Bool bool_)
         {
@@ -317,7 +272,6 @@ Result!LinExpr lin(Un un, ref LinBlock block, ref VarRecord rec)
 
 Result!LinExpr lin(Bin bin, ref LinBlock block, ref VarRecord rec)
 {
-    alias T = LinExpr;
     bool lhsIsAtomic = bin.lhs.isAtomic();
     bool rhsIsAtomic = bin.rhs.isAtomic();
     if (lhsIsAtomic && rhsIsAtomic)
@@ -368,10 +322,8 @@ private Result!Atom atom(Expr* expr, ref VarRecord rec) => (*expr).match!(
     (Int int_) => Atom(LinInt(new LinType(PrimitiveType.int_), int_.value)).result,
     (Ident ident)
     {
-        alias T = Atom;
-        auto var = rec.get(ident);
-        if (var.isErr) return var.err.result!T;
-        return Atom(var.get).result;
+        auto var = rec.get(ident)?;
+        return Atom(var).result;
     },
     _ => assert(0, "expression not atomic"),
 );
@@ -388,7 +340,6 @@ private bool isAtomic(const(Expr*) expr)
 
 private Result!(LinType*) on(BinOp binOp, LinType* lhsType, LinType* rhsType, Span lhsSpan, Span rhsSpan)
 {
-    alias T = LinType*;
     with (BinOp) final switch (binOp)
     {
     case logicalOr:
@@ -404,7 +355,7 @@ private Result!(LinType*) on(BinOp binOp, LinType* lhsType, LinType* rhsType, Sp
                 binOp.display,
                 rhsType.display,
                 ),
-                lhsSpan.joinSpans(rhsSpan)).result!T;
+                lhsSpan.joinSpans(rhsSpan)).result;
         }
         goto case;
     case equalTo:
@@ -426,7 +377,7 @@ private Result!(LinType*) on(BinOp binOp, LinType* lhsType, LinType* rhsType, Sp
             binOp.display,
             lhsType.display, rhsType.display,
             ),
-            lhsSpan.joinSpans(rhsSpan)).result!T;
+            lhsSpan.joinSpans(rhsSpan)).result;
     case bitwiseOr:
     case bitwiseXor:
     case bitwiseAnd:
@@ -452,7 +403,7 @@ private Result!(LinType*) on(BinOp binOp, LinType* lhsType, LinType* rhsType, Sp
             binOp.display,
             lhsType.display, rhsType.display,
             ),
-            lhsSpan.joinSpans(rhsSpan)).result!T;
+            lhsSpan.joinSpans(rhsSpan)).result;
     case arraySubscript:
     case memberAccess:
     case memberAccessThroughPointer:
@@ -462,7 +413,6 @@ private Result!(LinType*) on(BinOp binOp, LinType* lhsType, LinType* rhsType, Sp
 
 private Result!(LinType*) on(UnOp unOp, LinType* type, Span span)
 {
-    alias T = LinType*;
     with (UnOp) final switch (unOp)
     {
     case plus:
@@ -474,7 +424,7 @@ private Result!(LinType*) on(UnOp unOp, LinType* type, Span span)
                        .format(unOp.display,
                                unOp.display,
                                type.display), span)
-                   .result!T;
+                   .result;
         }
         return type.result;
     case logicalNot:
@@ -484,7 +434,7 @@ private Result!(LinType*) on(UnOp unOp, LinType* type, Span span)
                        .format(unOp.display,
                                unOp.display,
                                type.display), span)
-                   .result!T;
+                   .result;
         }
         return result(new LinType(PrimitiveType.bool_));
     case pointerDereference:
@@ -493,7 +443,7 @@ private Result!(LinType*) on(UnOp unOp, LinType* type, Span span)
             {
                 return Err("dereference of primitive type `%s`"
                            .format(type.display), span)
-                       .result!T;
+                       .result;
             },
             (LinPointer pointer) => pointer.pointee.result,
         );
@@ -526,9 +476,8 @@ struct VarRecord
 
     Result!LinVar get(Ident ident)
     {
-        alias T = LinVar;
         auto var = get(ident.name);
-        if (var.isNull) return Err("variable not defined", ident.span).result!T;
+        if (var.isNull) return Err("variable not defined", ident.span).result;
         return var.get.result;
     }
 

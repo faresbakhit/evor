@@ -1,4 +1,4 @@
-module evorc.utils.result;
+module evorc.utils.result;//
 
 import std.traits;
 
@@ -143,10 +143,10 @@ unittest
         }
     }
 
-    auto r1 = ["1", "2", "3"].map!parse.result;
+    auto r1 = ["1", "2", "3"].map!parse.collect;
     assert(!r1.isErr);
     assert(r1.get == [1, 2, 3]);
 
-    auto r2 = ["1", "a", "3"].map!parse.result;
+    auto r2 = ["1", "a", "3"].map!parse.collect;
     assert(r2.isErr);
 }

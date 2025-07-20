@@ -121,7 +121,6 @@ private alias IdentTok = evorc.tok.Ident;
 Result!Program parse(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = Program;
     Program prog;
     while (!toks.front.has!Eof)
     {
@@ -134,7 +133,6 @@ if (isTokRange!Range)
 private Result!ProgramItem parseProgramItem(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = ProgramItem;
     auto retType = parseType(toks)?;
     auto ident = parseIdent(toks)?;
     auto params = parseParams(toks)?;
@@ -150,16 +148,15 @@ if (isTokRange!Range)
 private Result!(Type*) parseType(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = Type*;
     Tok tok = toks.pop;
-    if (!tok.has!IdentTok) return Err("expected type, found `%s`", tok).result!T;
+    if (!tok.has!IdentTok) return Err("expected type, found `%s`", tok).result;
     Type* type;
     switch (tok.get!IdentTok.name)
     {
     case "int": type = new Type(Primitive(tok.span, PrimitiveType.int_)); break;
     case "bool": type = new Type(Primitive(tok.span, PrimitiveType.bool_)); break;
     case "void": type = new Type(Primitive(tok.span, PrimitiveType.void_)); break;
-    default: return Err("expected type, found %s", tok).result!T;
+    default: return Err("expected type, found %s", tok).result;
     }
     tok = toks.front;
     auto span = tok.span;
@@ -176,17 +173,16 @@ if (isTokRange!Range)
 private Result!(Param[]) parseParams(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = Param[];
     auto err = toks.expect!"(";
-    if (!err.isNull) return err.get.result!T;
-    if (toks.nextIs!")") return [].result!T;
+    if (!err.isNull) return err.get.result;
+    if (toks.nextIs!")") return [].result;
     Param[] params;
     auto p = parseParam(toks)?;
     params ~= p;
     while (!toks.nextIs!")")
     {
         err = toks.expect!",";
-        if (!err.isNull) return Err("expected `,` or `)`, found %s", err.get.tok).result!T;
+        if (!err.isNull) return Err("expected `,` or `)`, found %s", err.get.tok).result;
         p = parseParam(toks)?;
         params ~= p;
     }
@@ -196,7 +192,6 @@ if (isTokRange!Range)
 private Result!Param parseParam(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = Param;
     auto type = parseType(toks)?;
     if (!toks.front.has!IdentTok)
         return Param(type.span, type, Nullable!Ident.init).result;
@@ -208,9 +203,8 @@ if (isTokRange!Range)
 private Result!Block parseBlock(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = Block;
     auto err = toks.expect!"{";
-    if (!err.isNull) return err.get.result!T;
+    if (!err.isNull) return err.get.result;
     Block block;
     while (!toks.nextIf!"}")
     {
@@ -223,7 +217,6 @@ if (isTokRange!Range)
 private Result!(Stmt*) parseStmt(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = Stmt*;
     if (toks.nextIf!";")
     {
         return result(new Stmt(NullableRef!Expr.init));
@@ -231,10 +224,10 @@ if (isTokRange!Range)
     if (toks.nextIf!"if")
     {
         // auto err = toks.expect!"(";
-        // if (!err.isNull) return err.get.result!T;
+        // if (!err.isNull) return err.get.result;
         auto cond = parseExpr(toks)?;
         // err = toks.expect!")";
-        // if (!err.isNull) return err.get.result!T;
+        // if (!err.isNull) return err.get.result;
         Block ifBlock;
         if (toks.nextIs!"{") {
             ifBlock = parseBlock(toks)?;
@@ -262,7 +255,7 @@ if (isTokRange!Range)
             return result(new Stmt(Return(retSpan, NullableRef!Expr.init)));
         auto expr = parseExpr(toks)?;
         auto err = toks.expect!";";
-        if (!err.isNull) return err.get.result!T;
+        if (!err.isNull) return err.get.result;
         auto span = retSpan.joinSpans(expr.span);
         return result(new Stmt(Return(span, expr.nullableRef)));
     }
@@ -291,7 +284,7 @@ if (isTokRange!Range)
     stmt = new Stmt(varDecl.get);
 expectSemicolon:
     auto err = toks.expect!";";
-    if (!err.isNull) return err.get.result!T;
+    if (!err.isNull) return err.get.result;
     return stmt.result;
 }
 
@@ -304,7 +297,6 @@ if (isTokRange!Range)
 private Result!(Expr*) parseExpr(Range)(auto ref Range toks, ushort min_bp)
 if (isTokRange!Range)
 {
-    alias T = Expr*;
     Tok tok = toks.pop;
     auto res = tok.type.match!(
         (Sym symbol)
@@ -314,17 +306,17 @@ if (isTokRange!Range)
                 auto lhs = parseExpr(toks);
                 auto exprEndSpan = toks.front.span;
                 auto err = toks.expect!")";
-                if (!err.isNull) return err.get.result!T;
+                if (!err.isNull) return err.get.result;
                 if (!lhs.isErr)
                     lhs.get.span = tok.span.joinSpans(exprEndSpan);
                 return lhs;
             }
             auto op = unOp(symbol);
-            if (op.isNull) return Err("expected expression, found `%s`", tok).result!T;
+            if (op.isNull) return Err("expected expression, found `%s`", tok).result;
             auto rhsBP = unOpBindingPower(op.get);
-            auto rhs = parseExpr(toks, rhsBP);
-            if (rhs.isErr) return rhs.err.result!T;
-            return result(new Expr(Un(tok.span.joinSpans(rhs.get.span), op.get, rhs.get)));
+            auto rhs = parseExpr(toks, rhsBP)?;
+            auto span = tok.span.joinSpans(rhs.span);
+            return result(new Expr(Un(span, op.get, rhs)));
         },
         (evorc.tok.Bool bool_) => result(new Expr(Bool(tok.span, bool_.value))),
         (evorc.tok.Int int_) => result(new Expr(Int(tok.span, int_.value))),
@@ -339,21 +331,19 @@ if (isTokRange!Range)
                 return result(new Expr(Call(tok.span.joinSpans(callEndSpan), func, [])));
             }
             Args args;
-            auto expr = parseExpr(toks);
-            if (expr.isErr) return expr.err.result!T;
-            args ~= expr.get;
+            auto expr = parseExpr(toks)?;
+            args ~= expr;
             while (!toks.nextIs!")")
             {
                 auto err = toks.expect!",";
-                if (!err.isNull) return err.get.result!T;
-                expr = parseExpr(toks);
-                if (expr.isErr) return expr.err.result!T;
-                args ~= expr.get;
+                if (!err.isNull) return err.get.result;
+                expr = parseExpr(toks)?;
+                args ~= expr;
             }
             auto span = tok.span.joinSpans(toks.pop.span);
             return result(new Expr(Call(span, func, args)));
         },
-        _ => Err("expected expression, found `%s`", tok).result!T,
+        _ => Err("expected expression, found `%s`", tok).result!(Expr*),
     );
     if (res.isErr) return res;
     auto lhs = res.get;
@@ -366,9 +356,9 @@ if (isTokRange!Range)
         if (bp.lhs < min_bp)
             break;
         toks.popFront;
-        auto rhs = parseExpr(toks, bp.rhs);
-        if (rhs.isErr) return rhs.err.result!T;
-        lhs = new Expr(Bin(lhs.span.joinSpans(rhs.get.span), op.get, lhs, rhs.get));
+        auto rhs = parseExpr(toks, bp.rhs)?;
+        auto span = lhs.span.joinSpans(rhs.span);
+        lhs = new Expr(Bin(span, op.get, lhs, rhs));
     }
     return lhs.result;
 }
@@ -376,27 +366,24 @@ if (isTokRange!Range)
 private Result!VarDecl parseVarDecl(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = VarDecl;
-    auto type = parseType(toks);
-    if (type.isErr) return type.err.result!T;
-    auto ident = parseIdent(toks);
-    if (ident.isErr) return ident.err.result!T;
+    auto type = parseType(toks)?;
+    auto ident = parseIdent(toks)?;
     if (toks.nextIf!"=")
     {
-        auto expr = parseExpr(toks);
-        if (expr.isErr) return expr.err.result!T;
-        return VarDecl(type.get.span.joinSpans(expr.get.span), type.get, ident.get, expr.get.nullableRef).result;
+        auto expr = parseExpr(toks)?;
+        auto span = type.span.joinSpans(expr.span);
+        return VarDecl(span, type, ident, expr.nullableRef).result;
     }
-    return VarDecl(type.get.span.joinSpans(ident.get.span), type.get, ident.get, NullableRef!Expr.init).result;
+    auto span = type.span.joinSpans(ident.span);
+    return VarDecl(span, type, ident, NullableRef!Expr.init).result;
 }
 
 private Result!Ident parseIdent(Range)(auto ref Range toks)
 if (isTokRange!Range)
 {
-    alias T = Ident;
     Tok tok = toks.pop;
     if (tok.has!IdentTok) return Ident(tok.span, tok.get!IdentTok.name).result;
-    return Err("expected identifier, found `%s`", tok).result!T;
+    return Err("expected identifier, found `%s`", tok).result;
 }
 
 private Nullable!UnOp unOp(Sym symbol)
