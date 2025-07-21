@@ -91,19 +91,20 @@ unittest
 private auto ref firstFieldImpl(SumType)(auto ref SumType sumType)
 if (isSumType!SumType && SumType.Types.length > 0 && allSameFirstType!SumType)
 {
-    alias First = FirstTypeOf!(SumType.Types[0]);
+    alias First = firstType!(SumType.Types[0]);
     return *cast(First*)(&sumType);
 }
 
-private alias allSameFirstType(SumType) = allSameType!(staticMap!(FirstTypeOf, SumType.Types));
+private alias allSameFirstType(SumType) = allSameType!(staticMap!(firstType, SumType.Types));
 
-private template FirstTypeOf(Tuple)
+private template firstType(T)
 {
-    import std.typecons : isTuple;
-    static if (isTuple!Tuple)
-        alias FirstTypeOf = Tuple.Types[0];
-    else static if (__traits(compiles, Tuple.tupleof))
-        alias FirstTypeOf = typeof(Tuple.tupleof[0]);
+    static if (isSumType!T && allSameFirstType!T)
+        alias firstType = firstType!(T.Types[0]);
+    else static if (isTuple!T)
+        alias firstType = T.Types[0];
+    else static if (__traits(compiles, T.tupleof))
+        alias firstType = typeof(Tuple.tupleof[0]);
     else
-        alias FirstTypeOf = Tuple;
+        alias firstType = Tuple;
 }

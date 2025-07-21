@@ -107,6 +107,24 @@ enum PrimitiveType
     void_,
 }
 
+Nullable!BinOp binOp(AssignMod assignMod)
+{
+    with (BinOp) with (AssignMod) final switch (assignMod)
+    {
+    case none: return Nullable!BinOp.init;
+    case add: return BinOp.add.nullable;
+    case sub: return BinOp.sub.nullable;
+    case mul: return BinOp.mul.nullable;
+    case div: return BinOp.div.nullable;
+    case rem: return BinOp.rem.nullable;
+    case bitwiseAnd: return BinOp.bitwiseAnd.nullable;
+    case bitwiseOr: return BinOp.bitwiseOr.nullable;
+    case bitwiseXor: return BinOp.bitwiseXor.nullable;
+    case bitwiseLeftShift: return BinOp.bitwiseLeftShift.nullable;
+    case bitwiseRightShift: return BinOp.bitwiseRightShift.nullable;
+    }
+}
+
 alias Err = Tuple!(string, "message", Tok, "tok");
 
 import evorc.utils.result : ResultWith;
@@ -124,8 +142,7 @@ if (isTokRange!Range)
     Program prog;
     while (!toks.front.has!Eof)
     {
-        auto item = parseProgramItem(toks)?;
-        prog ~= item;
+        prog ~= parseProgramItem(toks)?;
     }
     return prog.result;
 }
@@ -177,14 +194,12 @@ if (isTokRange!Range)
     if (!err.isNull) return err.get.result;
     if (toks.nextIs!")") return [].result;
     Param[] params;
-    auto p = parseParam(toks)?;
-    params ~= p;
+    params ~= parseParam(toks)?;
     while (!toks.nextIs!")")
     {
         err = toks.expect!",";
         if (!err.isNull) return Err("expected `,` or `)`, found %s", err.get.tok).result;
-        p = parseParam(toks)?;
-        params ~= p;
+        params ~= parseParam(toks)?;
     }
     return params.result;
 }
@@ -208,8 +223,7 @@ if (isTokRange!Range)
     Block block;
     while (!toks.nextIf!"}")
     {
-        auto stmt = parseStmt(toks)?;
-        block ~= stmt;
+        block ~= parseStmt(toks)?;
     }
     return block.result;
 }
@@ -331,14 +345,12 @@ if (isTokRange!Range)
                 return result(new Expr(Call(tok.span.joinSpans(callEndSpan), func, [])));
             }
             Args args;
-            auto expr = parseExpr(toks)?;
-            args ~= expr;
+            args ~= parseExpr(toks)?;
             while (!toks.nextIs!")")
             {
                 auto err = toks.expect!",";
                 if (!err.isNull) return err.get.result;
-                expr = parseExpr(toks)?;
-                args ~= expr;
+                args ~= parseExpr(toks)?;
             }
             auto span = tok.span.joinSpans(toks.pop.span);
             return result(new Expr(Call(span, func, args)));

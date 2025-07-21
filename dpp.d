@@ -18,6 +18,8 @@ void preprocess(Input, Output)(Input lineReader, Output textWriter)
         if (s.endsWith(`?;`))
         {
             char[] v, vMaybe;
+            bool assignToV = true;
+            string op = `=`;
             if (s.startsWith(`auto`))
             {
                 auto vStart = s.countUntil!isWhite + 1;
@@ -25,20 +27,30 @@ void preprocess(Input, Output)(Input lineReader, Output textWriter)
                 v = `auto ` ~ s[vStart..vEnd];
                 vMaybe = s[vStart..vEnd] ~ `MaybeDpp` ~ to!string(++i);
             }
-            else
+            else if (s.canFind(`=`))
             {
                 auto vEnd = s.countUntil!isWhite;
                 v = s[0..vEnd];
                 vMaybe = v ~ `MaybeDpp` ~ to!string(++i);
+                if (s.canFind(`~=`))
+                    op = `~=`;
+            }
+            else
+            {
+                vMaybe = v ~ `MaybeDpp` ~ to!string(++i);
+                assignToV = false;
             }
             auto eStart = s.countUntil('=') + 1;
             auto eEnd = s.countUntil('?');
             auto e = s[eStart..eEnd];
             textWriter.put(
                 `auto ` ~ vMaybe ~ `=` ~ e ~ `;`
-                ~ `if (` ~ vMaybe ~ `.isErr()) { return ` ~ vMaybe ~ `.err.result!(` ~ currType ~ `); }`
-                ~ v ~ `=` ~ vMaybe ~ `.get;` ~ '\n'
+                ~ `if (` ~ vMaybe ~ `.isErr()) return ` ~ vMaybe ~ `.err.result!(` ~ currType ~ `);`
             );
+            if (assignToV)
+                textWriter.put(v ~ op ~ vMaybe ~ `.get;` ~ '\n');
+            else
+                textWriter.put('\n');
         }
         else if (s.endsWith(`result;`))
         {

@@ -16,9 +16,8 @@ mixin Debug!(
     "Int", evorc.ast.Int,
     "Err", evorc.ast.Err,
     // evorc.lin
-    "LinFuncDecl", "LinParam", "LinFunc", "LinIf", "LinAssign", "LinReturn",
-    "LinVar", "LinPointer", "LinUn", "LinBin", "LinCall",
-    "LinBool", "LinInt", "Deref",
+    "LinFunc", "LinIf", "LinAssign", "LinReturn", "LinVar", "LinPointer",
+    "LinUn", "LinBin", "LinCall", "LinBool", "LinInt", "Deref",
     "Err", evorc.lin.Err,
 );
 
