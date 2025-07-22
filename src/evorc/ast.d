@@ -5,10 +5,13 @@
 
 module evorc.ast;
 
-import evorc.span;
-import std.typecons;
-import std.sumtype;
-import std.bigint;
+public import evorc.span : Span;
+public import std.bigint : BigInt;
+
+import evorc.utils.result : ResultWith;
+import evorc.utils.sumtype : firstField;
+import std.sumtype : SumType, This;
+import std.typecons : Tuple, Nullable, NullableRef;
 
 alias Program = ProgramItem[];
 alias ProgramItem = SumType!(FuncDecl, Func);
@@ -49,8 +52,7 @@ alias Call = Expr.Types[2];
 alias Bool = Tuple!(Span, "span", bool, "value");
 alias Int = Tuple!(Span, "span", BigInt, "value");
 alias Args = Expr*[];
-
-public import evorc.utils.sumtype : span = firstField;
+alias span = firstField;
 
 enum BinOp {
     add,
@@ -126,15 +128,17 @@ Nullable!BinOp binOp(AssignMod assignMod)
 }
 
 alias Err = Tuple!(string, "message", Tok, "tok");
-
-import evorc.utils.result : ResultWith;
-
 alias Result = ResultWith!(Err);
-auto result(T)(T ok) => Result!T(ok);
-auto result(T)(Err err) => Result!T(err);
 
+import evorc.span;
 import evorc.tok;
+import std.sumtype;
+import std.typecons;
+
 private alias IdentTok = evorc.tok.Ident;
+private auto result(T)(T ok) => Result!T(ok);
+private auto result(T)(Err err) => Result!T(err);
+
 
 Result!Program parse(Range)(auto ref Range toks)
 if (isTokRange!Range)

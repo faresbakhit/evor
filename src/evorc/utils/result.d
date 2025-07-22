@@ -1,4 +1,4 @@
-module evorc.utils.result;//
+module evorc.utils.result;
 
 import std.traits;
 

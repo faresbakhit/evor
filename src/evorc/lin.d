@@ -6,15 +6,17 @@
 
 module evorc.lin;
 
-import evorc.span;
-import evorc.ast;
+public import evorc.ast : UnOp, BinOp;
+public import evorc.span : Span;
+public import std.bigint : BigInt;
 
-import std.bigint;
-import std.sumtype;
-import std.typecons;
+import evorc.utils.result : ResultWith;
+import evorc.utils.sumtype : firstField;
+import std.sumtype : SumType, This;
+import std.typecons : Tuple, Nullable;
 
 alias LinProgram = LinFunc[];
-alias LinFunc = Tuple!(string, "name", LinType*, "retType", LinVar[], "params", LinBlock, "block");
+alias LinFunc = Tuple!(string, "name", LinType*, "retType", LinVar[], "params", LinBlock, "block", uint, "varCount");
 alias LinBlock = LinStmt*[];
 alias LinStmt = SumType!(
     Tuple!(LinExpr, "cond", This*[], "ifBlock", This*[], "elseBlock"), // LinIf
@@ -40,26 +42,26 @@ alias LinPointer = LinType.Types[0];
 alias LinUn = Tuple!(LinType*, "type", UnOp, "op", Atom, "expr");
 alias LinBin = Tuple!(LinType*, "type", BinOp, "op", Atom, "lhs", Atom, "rhs");
 alias LinCall = Tuple!(LinType*, "type", string, "func", Atom[], "args");
-
-public import evorc.utils.sumtype : type = firstField;
-
 alias Err = Tuple!(string, "message", Span, "span");
-
-import evorc.utils.result : ResultWith, collect;
-
 alias Result = ResultWith!(Err);
-auto result(T)(T ok) => Result!T(ok);
-auto result(T)(Err err) => Result!T(err);
+alias type = firstField;
 
-import evorc.utils.unit;
-import evorc.utils.sumtype;
+private auto result(T)(T ok) => Result!T(ok);
+private auto result(T)(Err err) => Result!T(err);
+
+import evorc.ast;
 import evorc.display;
-
+import evorc.span;
+import evorc.utils.result;
+import evorc.utils.sumtype;
+import evorc.utils.unit;
 import std.algorithm;
-import std.range;
 import std.array;
 import std.conv;
 import std.format;
+import std.range;
+import std.sumtype;
+import std.typecons;
 
 Result!LinProgram lin(Program prog)
 {
@@ -102,7 +104,7 @@ Result!LinFunc lin(Func fn, ref Record rec)
         )
         .array;
     auto block = lin(fn.block, fnRec)?;
-    return LinFunc(fn.decl.ident.name, retType, params, block).result;
+    return LinFunc(fn.decl.ident.name, retType, params, block, fnRec.varCount).result;
 }
 
 LinType* lin(Type* type) => (*type).match!(

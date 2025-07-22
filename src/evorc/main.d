@@ -17,11 +17,24 @@ void main(string[] args)
         .match!(
             (Program prog)
             {
-                prog.lin.dbg.writeln;
+                prog
+                    .lin
+                    .match!(
+                        (LinProgram prog)
+                        {
+                            prog
+                                .x86
+                                .write;
+                        },
+                        (evorc.lin.Err err)
+                        {
+                            err.dbg.writeln;
+                        }
+                    );
             },
             (evorc.ast.Err err)
             {
                 err.dbg.writeln;
-            },
+            }
         );
 }

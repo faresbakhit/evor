@@ -14,8 +14,9 @@ void preprocess(Input, Output)(Input lineReader, Output textWriter)
     string currType = "T";
     foreach (line; lineReader)
     {
+        auto isStmt = line.length > 0 && isWhite(line[0]);
         auto s = line.strip();
-        if (s.endsWith(`?;`))
+        if (isStmt && s.endsWith(`?;`))
         {
             char[] v, vMaybe;
             bool assignToV = true;
@@ -52,7 +53,7 @@ void preprocess(Input, Output)(Input lineReader, Output textWriter)
             else
                 textWriter.put('\n');
         }
-        else if (s.endsWith(`result;`))
+        else if (isStmt && s.endsWith(`result;`))
         {
             auto end = `result;`;
             textWriter.put(s[0..($-end.length)] ~ `result!(` ~ currType ~ ");\n");

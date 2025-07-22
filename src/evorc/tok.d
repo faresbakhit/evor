@@ -5,7 +5,8 @@
 
 module evorc.tok;
 
-import evorc.span;
+public import evorc.span : Span;
+
 import std;
 
 enum Sym
