@@ -4,5 +4,5 @@ public import
     evorc.tok,
     evorc.ast,
     evorc.lin,
-    evorc.x86,
+    evorc.x64,
     evorc.dbg;

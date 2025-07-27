@@ -3,7 +3,7 @@ module evorc.main;
 import evorc;
 import std;
 
-void main(string[] args)
+int main(string[] args)
 {
     string source;
     if (args.length > 1) {
@@ -11,30 +11,31 @@ void main(string[] args)
     } else {
         source = readText("/dev/stdin");
     }
-    source
+    return source
         .tokenize
         .parse
         .match!(
             (Program prog)
             {
-                prog
+                return prog
                     .lin
                     .match!(
                         (LinProgram prog)
                         {
-                            prog
-                                .x86
-                                .write;
+                            x64(prog, stdout.lockingTextWriter());
+                            return 0;
                         },
                         (evorc.lin.Err err)
                         {
-                            err.dbg.writeln;
+                            stderr.writeln(err.dbg);
+                            return 1;
                         }
                     );
             },
             (evorc.ast.Err err)
             {
-                err.dbg.writeln;
+                stderr.writeln(err.dbg);
+                return 1;
             }
         );
 }

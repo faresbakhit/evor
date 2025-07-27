@@ -6,7 +6,7 @@
 
 module evorc.lin;
 
-public import evorc.ast : UnOp, BinOp;
+public import evorc.ast : UnOp, BinOp, PrimitiveType;
 public import evorc.span : Span;
 public import std.bigint : BigInt;
 
@@ -33,13 +33,14 @@ alias LinExpr = SumType!(Atom, LinUn, LinBin, LinCall);
 alias Atom = SumType!(LinBool, LinInt, LinVar);
 alias LinBool = Tuple!(LinType*, "type", bool, "value");
 alias LinInt = Tuple!(LinType*, "type", BigInt, "value");
-alias LinVar = Tuple!(LinType*, "type", uint, "id");
+alias LinVar = Tuple!(LinType*, "type", VarId, "id");
 alias LinType = SumType!(
     Tuple!(This*, "pointee"), // LinPointer
     PrimitiveType,
 );
 alias LinPointer = LinType.Types[0];
-alias LinUn = Tuple!(LinType*, "type", UnOp, "op", Atom, "expr");
+alias VarId = uint;
+alias LinUn = Tuple!(LinType*, "type", UnOp, "op", Atom, "atom");
 alias LinBin = Tuple!(LinType*, "type", BinOp, "op", Atom, "lhs", Atom, "rhs");
 alias LinCall = Tuple!(LinType*, "type", string, "func", Atom[], "args");
 alias Err = Tuple!(string, "message", Span, "span");
@@ -142,7 +143,11 @@ Result!Unit lin(If if_, ref LinBlock block, ref Record rec)
 
 Result!Unit lin(Return ret, ref LinBlock block, ref Record rec)
 {
-    if (ret.expr.isNull) return unit.result;
+    if (ret.expr.isNull)
+    {
+        block ~= new LinStmt(LinReturn(Nullable!LinExpr.init));
+        return unit.result;
+    }
     auto expr = lin(ret.expr.bitCast!(Expr*), block, rec)?;
     block ~= new LinStmt(LinReturn(expr.nullable));
     return unit.result;
@@ -287,12 +292,20 @@ Result!LinExpr lin(Un un, ref LinBlock block, ref Record rec)
     return (*un.expr).match!(
         (Bool bool_)
         {
+            if (un.op == UnOp.addressOf)
+            {
+                return Err("cannot take address of rvalue expression", un.span).result;
+            }
             auto exprType = new LinType(PrimitiveType.bool_);
             auto unExprType = un.op.on(exprType, un.span)?;
             return LinExpr(LinUn(unExprType, un.op, Atom(LinBool(exprType, bool_.value)))).result;
         },
         (Int int_)
         {
+            if (un.op == UnOp.addressOf)
+            {
+                return Err("cannot take address of rvalue expression", un.span).result;
+            }
             auto exprType = new LinType(PrimitiveType.int_);
             auto unExprType = un.op.on(exprType, un.span)?;
             return LinExpr(LinUn(unExprType, un.op, Atom(LinInt(exprType, int_.value)))).result;
@@ -306,6 +319,11 @@ Result!LinExpr lin(Un un, ref LinBlock block, ref Record rec)
         (_)
         {
             auto expr = lin(un.expr, block, rec)?;
+            if (un.op == UnOp.addressOf)
+            {
+                if (!(expr.has!LinUn && expr.get!LinUn.op == UnOp.pointerDereference))
+                    return Err("cannot take address of rvalue expression", un.span).result;
+            }
             auto var = rec.next(type(expr));
             auto type = un.op.on(var.type, un.span)?;
             block ~= new LinStmt(LinAssign(LValue(var), expr));

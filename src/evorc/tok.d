@@ -307,6 +307,7 @@ private struct Lexer(S) {
         // Assumption: All symbolic tokens of multiple codepoints are ASCII
         char ch1 = idx < src.length ? src[idx] : '\0';
         char ch2 = idx + 1 < src.length ? src[idx + 1] : '\0';
+        bool neg = false;
         switch (ch0)
         {
         case '<':
@@ -366,6 +367,15 @@ private struct Lexer(S) {
                 idx++;
                 break;
             default:
+                if (isDigit(ch1))
+                {
+                    neg = true;
+                    ch0 = ch1;
+                    ch1 = ch2;
+                    ch2 = idx + 2 < src.length ? src[idx + 2] : '\0';
+                    ++idx;
+                    goto intTok;
+                }
                 symbol = Sym.minus;
             }
             goto ret;
@@ -432,6 +442,14 @@ private struct Lexer(S) {
             idx += (ch1 == '=');
             goto ret;
         case '+':
+            if (isDigit(ch1))
+            {
+                ch0 = ch1;
+                ch1 = ch2;
+                ch2 = idx + 2 < src.length ? src[idx + 2] : '\0';
+                ++idx;
+                goto intTok;
+            }
             symbol = (ch1 == '=') ? Sym.plusEqual : Sym.plus;
             idx += (ch1 == '=');
             goto ret;
@@ -502,6 +520,7 @@ private struct Lexer(S) {
         }
         if (isDigit(ch0))
         {
+        intTok:
             uint radix = 10;
             if (ch0 == '0')
             {
@@ -560,6 +579,7 @@ private struct Lexer(S) {
                 v += c - '0';
                 ++idx;
             } while (idx < src.length);
+            if (neg) v = -v;
             tok = Tok(src[start..idx], TokType(Int(v)));
             return;
         }
