@@ -58,6 +58,11 @@ void preprocess(Input, Output)(Input lineReader, Output textWriter)
             auto end = `result;`;
             textWriter.put(s[0..($-end.length)] ~ `result!(` ~ currType ~ ");\n");
         }
+        else if (isStmt && s.endsWith(`result,`))
+        {
+            auto end = `result,`;
+            textWriter.put(s[0..($-end.length)] ~ `result!(` ~ currType ~ "),\n");
+        }
         else
         {
             auto captures = matchFirst(s, funcRegex);

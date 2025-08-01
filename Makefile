@@ -21,3 +21,7 @@ dpp: dpp.d
 
 build/evorc/utils:
 	mkdir -p build/evorc/utils
+
+.PHONY: clean
+clean:
+	rm -rf build/ dpp evorc evorc-unittest

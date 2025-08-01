@@ -3,26 +3,27 @@ module evorc.dbg;
 import evorc;
 
 mixin Debug!(
-    // evorc.tok
-    "Bool", evorc.tok.Bool,
-    "Int", evorc.tok.Int,
-    "Ident", evorc.tok.Ident,
-    "Unknown", "Eof",
-    // evorc.ast
+    evorc.tok,
+    "Bool", "Int", "Ident", "Unknown",
+    evorc.ast,
     "FuncDecl", "Pointer", "Primitive", "Param", "Func", "If", "Return",
-    "VarDecl", "Assign", "Un", "Bin", "Call",
-    "Ident", evorc.ast.Ident,
-    "Bool", evorc.ast.Bool,
-    "Int", evorc.ast.Int,
-    "Err", evorc.ast.Err,
-    // evorc.lin
+    "VarDecl", "Assign", "Un", "Bin", "Call", "Ident", "Bool", "Int", "Err",
+    evorc.lin,
     "LinFunc", "LinIf", "LinAssign", "LinReturn", "LinVar", "LinPointer",
-    "LinUn", "LinBin", "LinCall", "LinBool", "LinInt", "Deref",
-    "Err", evorc.lin.Err,
+    "LinUn", "LinBin", "LinCall", "LinBool", "LinInt", "Deref", "Err",
+    evorc.tac,
+    "Func", "Label", "Jmp", "Jcc", "Bin", "Un", "Assign", "Load", "Store",
+    "Param", "Call", "Return", "Var", "Int", "Bool", "Struct", "Pointer",
 );
 
-import std;
 import evorc.utils.result : Result;
+import std.algorithm;
+import std.format;
+import std.meta;
+import std.range;
+import std.sumtype;
+import std.traits;
+import std.typecons;
 
 private mixin template Debug(Specs...)
 {
@@ -197,6 +198,35 @@ private template parseSpecs(Specs...)
     {
         alias parseSpecs = AliasSeq!();
     }
+    else static if (isModule!(Specs[0]))
+    {
+        static if (Specs.length == 1)
+        {
+            alias parseSpecs = AliasSeq!();
+        }
+        else static if (isModule!(Specs[1]))
+        {
+            alias parseSpecs = parseSpecs!(Specs[1..$]);
+        }
+        else static if (Specs.length > 2 && !is(typeof(Specs[1]) : string))
+        {
+            alias parseSpecs =
+                AliasSeq!(AliasSpec!(Specs[1 .. 3]),
+                          parseSpecs!(Specs[0], Specs[3 .. $]));
+        }
+        else static if (is(typeof(Specs[1]) : string))
+        {
+            alias parseSpecs = AliasSeq!(
+                AliasSpec!(Specs[1], mixin("Specs[0]" ~ "." ~ Specs[1])),
+                parseSpecs!(Specs[0], Specs[2..$])
+            );
+        }
+        else
+        {
+            static assert(0, "Attempted to instantiate Debug mixin with an "
+                            ~"invalid argument: "~ Specs[1].stringof);
+        }
+    }
     else static if (Specs.length > 1 && !is(typeof(Specs[1]) : string))
     {
         alias parseSpecs =
@@ -215,6 +245,8 @@ private template parseSpecs(Specs...)
                         ~"invalid argument: "~ Specs[0].stringof);
     }
 }
+
+enum bool isModule(alias T) = T.stringof.startsWith("module ");
 
 private template AliasSpec(string s, T)
 {

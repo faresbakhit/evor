@@ -1,9 +1,9 @@
 module evorc.display;
 
-public import std.format : format;
+import std.format;
 
 import evorc;
-import std;
+import std.sumtype;
 
 string display(BinOp binOp)
 {
@@ -59,4 +59,10 @@ string display(PrimitiveType primitiveType)
 string display(LinType* type) => (*type).match!(
     (LinPointer ptr) => display(ptr.pointee) ~ "*",
     (PrimitiveType primitiveType) => primitiveType.display,
+);
+
+string display(evorc.tac.Type type, ref evorc.tac.Record rec) => type.match!(
+    (evorc.tac.Primitive primitive) => primitive.display,
+    (evorc.tac.Struct struc) => "struct",
+    (evorc.tac.Pointer ptr) => display(rec.getType(ptr.base), rec) ~ "*",
 );

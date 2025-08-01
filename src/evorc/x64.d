@@ -1,15 +1,5 @@
 module evorc.x64;
 
-import evorc.lin;
-import std.algorithm;
-import std.array;
-import std.conv;
-import std.traits;
-import std.format;
-import std.functional;
-import std.sumtype;
-import std.typecons;
-
 string x64(LinProgram prog)
 {
     auto app = appender!string();
@@ -25,7 +15,17 @@ void x64(Writer)(LinProgram prog, auto ref Writer sink)
     sink.directive("section", ".note.GNU-stack", `""`, "@progbits");
 }
 
-private {
+private
+{
+import evorc.lin;
+import std.algorithm;
+import std.array;
+import std.conv;
+import std.format;
+import std.functional;
+import std.sumtype;
+import std.traits;
+import std.typecons;
 
 void x64(W)(auto ref W s, LinFunc func)
 {
@@ -40,10 +40,17 @@ void x64(W)(auto ref W s, LinFunc func)
     uint stackSize;
     uint[VarId] stackOffsets;
 
+    Mem mem(LinVar var)
+    {
+        auto varSize = sizeof(var.type);
+        auto varOffset = stackOffsets.require(var.id, stackSize += varSize);
+        return .mem(varSize, Reg.rbp, -varOffset);
+    }
+
     void paramFrom(Reg srcReg)(LinVar param) {
         auto size = sizeof(param.type);
         auto offset = stackOffsets.require(param.id, stackSize += size);
-        ss.instr(Instr.mov, mem(size, Reg.rbp, -offset), reg(size, srcReg));
+        ss.instr(Instr.mov, .mem(size, Reg.rbp, -offset), reg(size, srcReg));
     }
 
     if (func.params.length > 0) paramFrom!(Reg.rdi)(func.params[0]);
@@ -64,11 +71,12 @@ void x64(W)(auto ref W s, LinFunc func)
                     {
                         auto size = sizeof(var.type);
                         auto offset = stackOffsets.require(var.id, stackSize += size);
-                        auto atom(Flag!"destIsRax" destIsRax = No.destIsRax)(Atom atom, Instr instr = Instr.mov) {
+                        auto dest = .mem(size, Reg.rbp, -offset);
+                        auto mov(Flag!"destIsRax" destIsRax = No.destIsRax)(Atom atom, Instr instr = Instr.mov) {
                             static if (destIsRax)
                                 auto dest = reg(size, Reg.rax);
                             else
-                                auto dest = mem(size, Reg.rbp, -offset);
+                                auto dest = .mem(size, Reg.rbp, -offset);
                             atom.match!(
                                 (LinBool bool_)
                                 {
@@ -82,116 +90,175 @@ void x64(W)(auto ref W s, LinFunc func)
                                 {
                                     auto assignedSize = sizeof(assignedVar.type);
                                     auto assignedOffset = stackOffsets.require(assignedVar.id, stackSize += size);
-                                    ss.instr(Instr.mov, reg(assignedSize, Reg.rax), mem(assignedSize, Reg.rbp, -assignedOffset));
+                                    ss.instr(Instr.mov, reg(assignedSize, Reg.rax), .mem(assignedSize, Reg.rbp, -assignedOffset));
                                     ss.instr(instr, dest, reg(size, Reg.rax));
                                 },
                             );
                         }
                         assign.rhs.match!(
-                            atom!(No.destIsRax),
+                            mov!(No.destIsRax),
                             (LinUn un)
                             {
                                 with (UnOp) final switch (un.op)
                                 {
                                 case plus:
-                                    atom(un.atom);
+                                    mov(un.atom);
                                     break;
                                 case minus:
-                                    atom(un.atom);
-                                    ss.instr(Instr.neg, mem(size, Reg.rbp, -offset));
+                                    mov(un.atom);
+                                    ss.instr(Instr.neg, dest);
                                     break;
                                 case bitwiseNot:
-                                    atom(un.atom);
-                                    ss.instr(Instr.not, mem(size, Reg.rbp, -offset));
+                                    mov(un.atom);
+                                    ss.instr(Instr.not, dest);
                                     break;
                                 case logicalNot:
-                                    atom(un.atom);
-                                    ss.instr(Instr.xor, mem(size, Reg.rbp, -offset), 1);
+                                    mov(un.atom);
+                                    ss.instr(Instr.xor, dest, 1);
                                     break;
                                 case pointerDereference:
                                     auto lval = un.atom.get!LinVar;
                                     auto lvalSize = sizeof(lval.type);
                                     auto lvalOffset = stackOffsets.require(lval.id, stackSize += size);
-                                    ss.instr(Instr.mov, Reg.rax, mem(Reg.rbp, -lvalOffset));
-                                    ss.instr(Instr.mov, reg(size, Reg.rax), mem(Reg.rax));
-                                    ss.instr(Instr.mov, mem(size, Reg.rbp, -offset), reg(size, Reg.rax));
+                                    auto l = Reg.rax;
+                                    auto a = reg(size, Reg.rax);
+                                    ss.instr(Instr.mov, l, .mem(Reg.rbp, -lvalOffset));
+                                    ss.instr(Instr.mov, a, .mem(l));
+                                    ss.instr(Instr.mov, dest, a);
                                     break;
                                 case addressOf:
                                     auto lval = un.atom.get!LinVar;
                                     auto lvalSize = sizeof(lval.type);
                                     auto lvalOffset = stackOffsets.require(lval.id, stackSize += size);
-                                    ss.instr(Instr.lea, Reg.rax, mem(Reg.rbp, -lvalOffset));
-                                    ss.instr(Instr.mov, mem(size, Reg.rbp, -offset), Reg.rax);
+                                    auto l = Reg.rax;
+                                    ss.instr(Instr.lea, l, .mem(Reg.rbp, -lvalOffset));
+                                    ss.instr(Instr.mov, dest, l);
                                     break;
                                 }
                             },
                             (LinBin bin)
                             {
+                                template cmp(alias instr, alias invInstr)
+                                {
+                                    alias cmp = match!(
+                                        (LinVar var1, LinVar var2)
+                                        {
+                                            auto a = reg(sizeof(var1.type), Reg.rax);
+                                            ss.instr(Instr.mov, a, mem(var1));
+                                            ss.instr(Instr.cmp, a, mem(var2));
+                                            ss.instr(instr, dest);
+                                        },
+                                        (LinVar var, i)
+                                        {
+                                            ss.instr(Instr.cmp, mem(var), i);
+                                            ss.instr(instr, dest);
+                                        },
+                                        (i, LinVar var)
+                                        {
+                                            ss.instr(Instr.cmp, mem(var), i);
+                                            ss.instr(invInstr, dest);
+                                        },
+                                        (i1, i2)
+                                        {
+                                            auto a = reg(sizeof(i1.type), Reg.rax);
+                                            ss.instr(Instr.mov, a, i1);
+                                            ss.instr(Instr.cmp, a, i2);
+                                            ss.instr(instr, dest);
+                                        },
+                                    );
+                                }
+
+                                template additive(alias instr)
+                                {
+                                    alias additive = match!(
+                                        (LinVar var1, LinVar var2)
+                                        {
+                                            auto a = reg(sizeof(var1.type), Reg.rax);
+                                            ss.instr(Instr.mov, a, mem(var1));
+                                            ss.instr(instr, a, mem(var2));
+                                            ss.instr(Instr.mov, dest, a);
+                                        },
+                                        (LinVar var, i)
+                                        {
+                                            ss.instr(Instr.mov, Reg.eax, mem(var));
+                                            ss.instr(instr, Reg.eax, i);
+                                            ss.instr(Instr.mov, dest, Reg.eax);
+                                        },
+                                        (i, LinVar var)
+                                        {
+                                            ss.instr(Instr.mov, Reg.eax, i);
+                                            ss.instr(instr, Reg.eax, mem(var));
+                                            ss.instr(Instr.mov, dest, Reg.eax);
+                                        },
+                                        (i1, i2)
+                                        {
+                                            ss.instr(Instr.mov, Reg.eax, i1);
+                                            ss.instr(instr, Reg.eax, i2);
+                                            ss.instr(Instr.mov, dest, Reg.eax);
+                                        },
+                                    );
+                                }
+
                                 with (BinOp) final switch (bin.op)
                                 {
                                 case add:
-                                    atom(bin.lhs);
-                                    atom(bin.rhs, Instr.add);
+                                    additive!(Instr.add)(bin.lhs, bin.rhs);
                                     break;
                                 case sub:
-                                    atom(bin.lhs);
-                                    atom(bin.rhs, Instr.sub);
+                                    additive!(Instr.sub)(bin.lhs, bin.rhs);
                                     break;
                                 case mul:
-                                    atom(bin.lhs);
-                                    atom!(Yes.destIsRax)(bin.rhs, Instr.mov);
-                                    ss.instr(Instr.imul, mem(size, Reg.rbp, -offset));
-                                    ss.instr(Instr.mov, mem(size, Reg.rbp, -offset), reg(size, Reg.rax));
+                                    mov(bin.lhs);
+                                    mov!(Yes.destIsRax)(bin.rhs, Instr.mov);
+                                    ss.instr(Instr.imul, .mem(size, Reg.rbp, -offset));
+                                    ss.instr(Instr.mov, .mem(size, Reg.rbp, -offset), reg(size, Reg.rax));
                                     break;
                                 case div:
-                                    atom!(Yes.destIsRax)(bin.lhs, Instr.mov);
-                                    atom(bin.rhs);
+                                    mov!(Yes.destIsRax)(bin.lhs, Instr.mov);
+                                    mov(bin.rhs);
                                     ss.instr(Instr.cdq);
-                                    ss.instr(Instr.idiv, mem(size, Reg.rbp, -offset));
-                                    ss.instr(Instr.mov, mem(size, Reg.rbp, -offset), reg(size, Reg.rax));
+                                    ss.instr(Instr.idiv, .mem(size, Reg.rbp, -offset));
+                                    ss.instr(Instr.mov, .mem(size, Reg.rbp, -offset), reg(size, Reg.rax));
                                     break;
                                 case rem:
-                                    atom!(Yes.destIsRax)(bin.lhs, Instr.mov);
-                                    atom(bin.rhs);
+                                    mov!(Yes.destIsRax)(bin.lhs, Instr.mov);
+                                    mov(bin.rhs);
                                     ss.instr(Instr.cdq);
-                                    ss.instr(Instr.idiv, mem(size, Reg.rbp, -offset));
-                                    ss.instr(Instr.mov, mem(size, Reg.rbp, -offset), reg(size, Reg.rdx));
+                                    ss.instr(Instr.idiv, .mem(size, Reg.rbp, -offset));
+                                    ss.instr(Instr.mov, .mem(size, Reg.rbp, -offset), reg(size, Reg.rdx));
                                     break;
                                 case bitwiseAnd:
-                                    atom(bin.lhs);
-                                    atom(bin.rhs, Instr.and);
+                                case logicalAnd:
+                                    additive!(Instr.and)(bin.lhs, bin.rhs);
                                     break;
                                 case bitwiseOr:
-                                    atom(bin.lhs);
-                                    atom(bin.rhs, Instr.or);
+                                case logicalOr:
+                                    additive!(Instr.or)(bin.lhs, bin.rhs);
                                     break;
                                 case bitwiseXor:
-                                    atom(bin.lhs);
-                                    atom(bin.rhs, Instr.xor);
+                                    additive!(Instr.xor)(bin.lhs, bin.rhs);
                                     break;
                                 case bitwiseLeftShift:
                                     break;
                                 case bitwiseRightShift:
                                     break;
-                                case logicalAnd:
-                                    atom(bin.lhs);
-                                    atom(bin.rhs, Instr.and);
-                                    break;
-                                case logicalOr:
-                                    atom(bin.lhs);
-                                    atom(bin.rhs, Instr.or);
-                                    break;
                                 case equalTo:
+                                    cmp!(Instr.sete, Instr.setne)(bin.lhs, bin.rhs);
                                     break;
                                 case notEqualTo:
+                                    cmp!(Instr.setne, Instr.sete)(bin.lhs, bin.rhs);
                                     break;
                                 case lessThan:
+                                    cmp!(Instr.setl, Instr.setge)(bin.lhs, bin.rhs);
                                     break;
                                 case greaterThan:
+                                    cmp!(Instr.setg, Instr.setle)(bin.lhs, bin.rhs);
                                     break;
                                 case lessThanOrEqualTo:
+                                    cmp!(Instr.setle, Instr.setg)(bin.lhs, bin.rhs);
                                     break;
                                 case greaterThanOrEqualTo:
+                                    cmp!(Instr.setge, Instr.setl)(bin.lhs, bin.rhs);
                                     break;
                                 case arraySubscript:
                                     break;
@@ -215,9 +282,7 @@ void x64(W)(auto ref W s, LinFunc func)
                                         },
                                         (LinVar var)
                                         {
-                                            auto size = sizeof(var.type);
-                                            auto offset = stackOffsets.require(var.id, stackSize += size);
-                                            ss.instr(Instr.mov, reg(size, destReg), mem(size, Reg.rbp, -offset));
+                                            ss.instr(Instr.mov, reg(size, destReg), mem(var));
                                         },
                                     );
                                 }
@@ -228,7 +293,7 @@ void x64(W)(auto ref W s, LinFunc func)
                                 if (call.args.length > 4) argInto!(Reg.r8)(call.args[4]);
                                 if (call.args.length > 5) argInto!(Reg.r9)(call.args[5]);
                                 ss.instr(Instr.call, call.func);
-                                ss.instr(Instr.mov, mem(size, Reg.rbp, -offset), reg(size, Reg.rax));
+                                ss.instr(Instr.mov, dest, reg(size, Reg.rax));
                             },
                         );
                     },
@@ -258,9 +323,7 @@ void x64(W)(auto ref W s, LinFunc func)
                             },
                             (LinVar var)
                             {
-                                auto size = sizeof(var.type);
-                                auto offset = stackOffsets.require(var.id, stackSize += size);
-                                ss.instr(Instr.mov, reg(size, Reg.rax), mem(size, Reg.rbp, -offset));
+                                ss.instr(Instr.mov, reg(sizeof(var.type), Reg.rax), mem(var));
                             },
                         );
                     },
@@ -286,9 +349,7 @@ void x64(W)(auto ref W s, LinFunc func)
                         },
                         (LinVar var)
                         {
-                            auto size = sizeof(var.type);
-                            auto offset = stackOffsets.require(var.id, stackSize += size);
-                            ss.instr(Instr.mov, reg(size, destReg), mem(Reg.rbp, -offset));
+                            ss.instr(Instr.mov, reg(sizeof(var.type), destReg), mem(var));
                         },
                     );
                 }
@@ -498,7 +559,8 @@ Reg reg(uint size, Reg genReg)
 
 enum Instr
 {
-    mov, lea, add, sub, and, or, xor,
+    mov, lea, add, sub, and, or, xor, cmp,
+    sete, setne, setl, setg, setle, setge,
     push, neg, not, imul, idiv, call,
     leave, ret, cdq, 
 }
@@ -549,9 +611,14 @@ if (isIntegral!(Int))
     return to!string(int_);
 }
 
+string arg(bool bool_)
+{
+    return to!string(cast(int)bool_);
+}
+
 string arg(LinBool bool_)
 {
-    return "%s".format(cast(int)bool_.value);
+    return to!string(cast(int)bool_.value);
 }
 
 string arg(string s)

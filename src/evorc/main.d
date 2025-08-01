@@ -1,7 +1,8 @@
 module evorc.main;
 
 import evorc;
-import std;
+import std.stdio;
+import std.file;
 
 int main(string[] args)
 {
@@ -15,23 +16,19 @@ int main(string[] args)
         .tokenize
         .parse
         .match!(
-            (Program prog)
-            {
-                return prog
-                    .lin
-                    .match!(
-                        (LinProgram prog)
-                        {
-                            x64(prog, stdout.lockingTextWriter());
-                            return 0;
-                        },
-                        (evorc.lin.Err err)
-                        {
-                            stderr.writeln(err.dbg);
-                            return 1;
-                        }
-                    );
-            },
+            (evorc.ast.Program prog) { prog.tac.dbg.writeln; return 0; },
+            // (Program prog) => prog.lin.match!(
+            //     (LinProgram prog)
+            //     {
+            //         x64(prog, stdout.lockingTextWriter());
+            //         return 0;
+            //     },
+            //     (evorc.lin.Err err)
+            //     {
+            //         stderr.writeln(err.dbg);
+            //         return 1;
+            //     }
+            // ),
             (evorc.ast.Err err)
             {
                 stderr.writeln(err.dbg);

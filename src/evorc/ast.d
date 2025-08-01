@@ -1,6 +1,8 @@
 /**
- * Defines the abstract syntax tree of the Evor language and handles
- * syntactical analysis of a valid or invalid Evor program.
+ * Defines the abstract syntax tree of the Evor language and a
+ * function that transforms a range of tokens into it ([`parse`]).
+ *
+ * FE2: Syntax analysis.
  */
 
 module evorc.ast;
@@ -109,36 +111,8 @@ enum PrimitiveType
     void_,
 }
 
-Nullable!BinOp binOp(AssignMod assignMod)
-{
-    with (BinOp) with (AssignMod) final switch (assignMod)
-    {
-    case none: return Nullable!BinOp.init;
-    case add: return BinOp.add.nullable;
-    case sub: return BinOp.sub.nullable;
-    case mul: return BinOp.mul.nullable;
-    case div: return BinOp.div.nullable;
-    case rem: return BinOp.rem.nullable;
-    case bitwiseAnd: return BinOp.bitwiseAnd.nullable;
-    case bitwiseOr: return BinOp.bitwiseOr.nullable;
-    case bitwiseXor: return BinOp.bitwiseXor.nullable;
-    case bitwiseLeftShift: return BinOp.bitwiseLeftShift.nullable;
-    case bitwiseRightShift: return BinOp.bitwiseRightShift.nullable;
-    }
-}
-
 alias Err = Tuple!(string, "message", Tok, "tok");
 alias Result = ResultWith!(Err);
-
-import evorc.span;
-import evorc.tok;
-import std.sumtype;
-import std.typecons;
-
-private alias IdentTok = evorc.tok.Ident;
-private auto result(T)(T ok) => Result!T(ok);
-private auto result(T)(Err err) => Result!T(err);
-
 
 Result!Program parse(Range)(auto ref Range toks)
 if (isTokRange!Range)
@@ -151,8 +125,18 @@ if (isTokRange!Range)
     return prog.result;
 }
 
-private Result!ProgramItem parseProgramItem(Range)(auto ref Range toks)
-if (isTokRange!Range)
+private
+{
+import evorc.span;
+import evorc.tok;
+import std.sumtype;
+import std.typecons;
+
+alias IdentTok = evorc.tok.Ident;
+auto result(T)(T ok) => Result!T(ok);
+auto result(T)(Err err) => Result!T(err);
+
+Result!ProgramItem parseProgramItem(Range)(auto ref Range toks)
 {
     auto retType = parseType(toks)?;
     auto ident = parseIdent(toks)?;
@@ -166,8 +150,7 @@ if (isTokRange!Range)
     return ProgramItem(Func(decl, block)).result;
 }
 
-private Result!(Type*) parseType(Range)(auto ref Range toks)
-if (isTokRange!Range)
+Result!(Type*) parseType(Range)(auto ref Range toks)
 {
     Tok tok = toks.pop;
     if (!tok.has!IdentTok) return Err("expected type, found `%s`", tok).result;
@@ -191,8 +174,7 @@ if (isTokRange!Range)
 }
 
 // NOTE: Doesn't consume the last sym!")" token
-private Result!(Param[]) parseParams(Range)(auto ref Range toks)
-if (isTokRange!Range)
+Result!(Param[]) parseParams(Range)(auto ref Range toks)
 {
     auto err = toks.expect!"(";
     if (!err.isNull) return err.get.result;
@@ -208,8 +190,7 @@ if (isTokRange!Range)
     return params.result;
 }
 
-private Result!Param parseParam(Range)(auto ref Range toks)
-if (isTokRange!Range)
+Result!Param parseParam(Range)(auto ref Range toks)
 {
     auto type = parseType(toks)?;
     if (!toks.front.has!IdentTok)
@@ -219,8 +200,7 @@ if (isTokRange!Range)
     return Param(span, type, ident.nullable).result;
 }
 
-private Result!Block parseBlock(Range)(auto ref Range toks)
-if (isTokRange!Range)
+Result!Block parseBlock(Range)(auto ref Range toks)
 {
     auto err = toks.expect!"{";
     if (!err.isNull) return err.get.result;
@@ -232,8 +212,7 @@ if (isTokRange!Range)
     return block.result;
 }
 
-private Result!(Stmt*) parseStmt(Range)(auto ref Range toks)
-if (isTokRange!Range)
+Result!(Stmt*) parseStmt(Range)(auto ref Range toks)
 {
     if (toks.nextIf!";")
     {
@@ -306,14 +285,12 @@ expectSemicolon:
     return stmt.result;
 }
 
-private Result!(Expr*) parseExpr(Range)(auto ref Range toks)
-if (isTokRange!Range)
+Result!(Expr*) parseExpr(Range)(auto ref Range toks)
 {
     return parseExpr(toks, 0);
 }
 
-private Result!(Expr*) parseExpr(Range)(auto ref Range toks, ushort min_bp)
-if (isTokRange!Range)
+Result!(Expr*) parseExpr(Range)(auto ref Range toks, ushort min_bp)
 {
     Tok tok = toks.pop;
     auto res = tok.type.match!(
@@ -379,8 +356,7 @@ if (isTokRange!Range)
     return lhs.result;
 }
 
-private Result!VarDecl parseVarDecl(Range)(auto ref Range toks)
-if (isTokRange!Range)
+Result!VarDecl parseVarDecl(Range)(auto ref Range toks)
 {
     auto type = parseType(toks)?;
     auto ident = parseIdent(toks)?;
@@ -394,15 +370,14 @@ if (isTokRange!Range)
     return VarDecl(span, type, ident, NullableRef!Expr.init).result;
 }
 
-private Result!Ident parseIdent(Range)(auto ref Range toks)
-if (isTokRange!Range)
+Result!Ident parseIdent(Range)(auto ref Range toks)
 {
     Tok tok = toks.pop;
     if (tok.has!IdentTok) return Ident(tok.span, tok.get!IdentTok.name).result;
     return Err("expected identifier, found `%s`", tok).result;
 }
 
-private Nullable!UnOp unOp(Sym symbol)
+Nullable!UnOp unOp(Sym symbol)
 {
     with (UnOp) with (Sym) switch (symbol)
     {
@@ -416,7 +391,7 @@ private Nullable!UnOp unOp(Sym symbol)
     }
 }
 
-private Nullable!BinOp binOp(Sym symbol)
+Nullable!BinOp binOp(Sym symbol)
 {
     with (Sym) with (BinOp) switch (symbol)
     {
@@ -444,7 +419,7 @@ private Nullable!BinOp binOp(Sym symbol)
     }
 }
 
-private Nullable!AssignMod assignMod(Sym symbol)
+Nullable!AssignMod assignMod(Sym symbol)
 {
     with (Sym) with (AssignMod) switch (symbol)
     {
@@ -463,9 +438,9 @@ private Nullable!AssignMod assignMod(Sym symbol)
     }
 }
 
-private alias BindingPower = Tuple!(ushort, "lhs", ushort, "rhs");
+alias BindingPower = Tuple!(ushort, "lhs", ushort, "rhs");
 
-private BindingPower binOpBindingPower(BinOp binOp)
+BindingPower binOpBindingPower(BinOp binOp)
 {
     with (BinOp) final switch (binOp)
     {
@@ -499,7 +474,7 @@ private BindingPower binOpBindingPower(BinOp binOp)
     }
 }
 
-private ushort unOpBindingPower(UnOp unOp)
+ushort unOpBindingPower(UnOp unOp)
 {
     with (UnOp) final switch (unOp)
     {
@@ -513,7 +488,7 @@ private ushort unOpBindingPower(UnOp unOp)
     }
 }
 
-private Nullable!Err expect(string symbol, Range)(auto ref Range toks)
+Nullable!Err expect(string symbol, Range)(auto ref Range toks)
 {
     Tok tok = toks.pop;
     if (!tok.contains(sym!symbol))
@@ -524,7 +499,7 @@ private Nullable!Err expect(string symbol, Range)(auto ref Range toks)
     return Nullable!Err.init;
 }
 
-private bool nextIf(string symbol, Range)(auto ref Range toks)
+bool nextIf(string symbol, Range)(auto ref Range toks)
 {
     if (toks.nextIs!symbol)
     {
@@ -534,14 +509,15 @@ private bool nextIf(string symbol, Range)(auto ref Range toks)
     return false;
 }
 
-private bool nextIs(string symbol, Range)(auto ref Range toks)
+bool nextIs(string symbol, Range)(auto ref Range toks)
 {
     return toks.front.contains(sym!symbol);
 }
 
-private Tok pop(Range)(auto ref Range toks)
+Tok pop(Range)(auto ref Range toks)
 {
     Tok tok = toks.front;
     toks.popFront;
     return tok;
 }
+} // private

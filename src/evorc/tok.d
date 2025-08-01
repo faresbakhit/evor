@@ -1,177 +1,95 @@
 /**
- * Defines lexical tokens of the Evor language and handles the first
- * step of the compilation process: tokenization.
+ * Defines lexical tokens of the Evor language ([`TokType`]), a data
+ * structure that holds a token and its lexeme/location in source
+ * code ([`Tok`]), and a function that transforms a source code
+ * string or range of unicode characters into a range of [`Tok`]s
+ * ([`tokenize`]).
+ *
+ * FE1: Lexical analysis.
  */
 
 module evorc.tok;
 
 public import evorc.span : Span;
+public import std.bigint : BigInt;
 
-import std;
+import evorc.span;
+import std.ascii;
+import std.functional;
+import std.range.primitives;
+import std.sumtype;
+import std.traits;
+import std.typecons;
+import std.uni;
+import std.utf;
 
 enum Sym
 {
-    /// "<"
-    less,
-    /// ">"
-    greater,
-    /// "="
-    equal,
-    /// "!"
-    not,
-    /// "+"
-    plus,
-    /// "-"
-    minus,
-    /// "*"
-    star,
-    /// "/"
-    slash,
-    /// "%"
-    percent,
-    /// "^"
-    caret,
-    /// "&"
-    and,
-    /// "|"
-    bar,
-    /// "("
-    openParen,
-    /// ")"
-    closeParen,
-    /// "{"
-    openBrace,
-    /// "}"
-    closeBrace,
-    /// "["
-    openBracket,
-    /// "]"
-    closeBracket,
-    /// "~"
-    tilde,
-    /// ":"
-    colon,
-    /// ","
-    comma,
-    /// "."
-    dot,
-    /// ";"
-    semicolon,
+    @("<") less,
+    @(">") greater,
+    @("=") equal,
+    @("!") not,
+    @("+") plus,
+    @("-") minus,
+    @("*") star,
+    @("/") slash,
+    @("%") percent,
+    @("^") caret,
+    @("&") and,
+    @("|") bar,
+    @("(") openParen,
+    @(")") closeParen,
+    @("{") openBrace,
+    @("}") closeBrace,
+    @("[") openBracket,
+    @("]") closeBracket,
+    @("~") tilde,
+    @(":") colon,
+    @(",") comma,
+    @(".") dot,
+    @(";") semicolon,
 
-    /// "<<"
-    shiftLeft,
-    /// ">>"
-    shiftRight,
-    /// "&&", "∧"
-    andAnd,
-    /// "||", "∨"
-    barBar,
-    /// "<=", "≤"
-    lessEqual,
-    /// ">=", "≥"
-    greaterEqual,
-    /// "=="
-    equalEqual,
-    /// "!=", "≠"
-    notEqual,
-    /// "+="
-    plusEqual,
-    /// "-="
-    minusEqual,
-    /// "*="
-    starEqual,
-    /// "/="
-    slashEqual,
-    /// "%="
-    percentEqual,
-    /// "^="
-    caretEqual,
-    /// "&="
-    andEqual,
-    /// "|="
-    barEqual,
-    /// "->", "→"
-    arrow,
+    @("<<") shiftLeft,
+    @(">>") shiftRight,
+    @("&&", "∧") andAnd,
+    @("||", "∨") barBar,
+    @("<=", "≤") lessEqual,
+    @(">=", "≥") greaterEqual,
+    @("==") equalEqual,
+    @("!=", "≠") notEqual,
+    @("+=") plusEqual,
+    @("-=") minusEqual,
+    @("*=") starEqual,
+    @("/=") slashEqual,
+    @("%=") percentEqual,
+    @("^=") caretEqual,
+    @("&=") andEqual,
+    @("|=") barEqual,
+    @("->", "→") arrow,
 
-    /// "<<="
-    shiftLeftEqual,
-    /// ">>="
-    shiftRightEqual,
+    @("<<=") shiftLeftEqual,
+    @(">>=") shiftRightEqual,
 
-    /// break
-    break_,
-    /// continue
-    continue_,
-    /// else
-    else_,
-    /// for
-    for_,
-    /// if
-    if_,
-    /// return
-    return_,
-    /// while
-    while_,
+    @("break") break_,
+    @("continue") continue_,
+    @("else") else_,
+    @("for") for_,
+    @("if") if_,
+    @("return") return_,
+    @("while") while_,
 }
 
-Sym sym(string symbol)()
+Sym sym(string repr)()
 {
-    with (Sym)
+    static foreach (sym; EnumMembers!Sym)
     {
-    static if (symbol == "<") return less;
-    else static if (symbol == ">") return greater;
-    else static if (symbol == "=") return equal;
-    else static if (symbol == "!") return not;
-    else static if (symbol == "+") return plus;
-    else static if (symbol == "-") return minus;
-    else static if (symbol == "*") return star;
-    else static if (symbol == "/") return slash;
-    else static if (symbol == "%") return percent;
-    else static if (symbol == "^") return caret;
-    else static if (symbol == "&") return and;
-    else static if (symbol == "|") return bar;
-    else static if (symbol == "(") return openParen;
-    else static if (symbol == ")") return closeParen;
-    else static if (symbol == "{") return openBrace;
-    else static if (symbol == "}") return closeBrace;
-    else static if (symbol == "[") return openBracket;
-    else static if (symbol == "]") return closeBracket;
-    else static if (symbol == "~") return tilde;
-    else static if (symbol == ":") return colon;
-    else static if (symbol == ",") return comma;
-    else static if (symbol == ".") return dot;
-    else static if (symbol == ";") return semicolon;
-    else static if (symbol == "<<") return shiftLeft;
-    else static if (symbol == ">>") return shiftRight;
-    else static if (symbol == "&&") return andAnd;
-    else static if (symbol == "∧") return andAnd;
-    else static if (symbol == "||") return barBar;
-    else static if (symbol == "∨") return barBar;
-    else static if (symbol == "<=") return lessEqual;
-    else static if (symbol == "≤") return lessEqual;
-    else static if (symbol == ">=") return greaterEqual;
-    else static if (symbol == "≥") return greaterEqual;
-    else static if (symbol == "==") return equalEqual;
-    else static if (symbol == "!=") return notEqual;
-    else static if (symbol == "+=") return plusEqual;
-    else static if (symbol == "-=") return minusEqual;
-    else static if (symbol == "*=") return starEqual;
-    else static if (symbol == "/=") return slashEqual;
-    else static if (symbol == "%=") return percentEqual;
-    else static if (symbol == "^=") return caretEqual;
-    else static if (symbol == "&=") return andEqual;
-    else static if (symbol == "|=") return barEqual;
-    else static if (symbol == "->") return arrow;
-    else static if (symbol == "→") return arrow;
-    else static if (symbol == "<<=") return shiftLeftEqual;
-    else static if (symbol == ">>=") return shiftRightEqual;
-    else static if (symbol == "break") return break_; 
-    else static if (symbol == "continue") return continue_; 
-    else static if (symbol == "else") return else_; 
-    else static if (symbol == "for") return for_; 
-    else static if (symbol == "if") return if_; 
-    else static if (symbol == "return") return return_; 
-    else static if (symbol == "while") return while_; 
+        static foreach (symRepr; getUDAs!(sym, string))
+        {
+            static if (repr == symRepr)
+            {
+                return sym;
+            }
+        }
     }
 }
 
@@ -201,22 +119,16 @@ struct Tok
         return contains(this.type, value);
     }
 
+    static import std.sumtype;
+
     template has(T)
     {
-        bool has()
-        {
-            import std.sumtype : has;
-            return has!T(this.type);
-        }
+        alias has = partial!(std.sumtype.has!T, this.type);
     }
 
     template get(T)
     {
-        auto ref T get()
-        {
-            import std.sumtype : get;
-            return get!T(this.type);
-        }
+        alias get = partial!(std.sumtype.get!T, this.type);
     }
 }
 
@@ -237,14 +149,33 @@ unittest
         assert(toks.front.type.get!TokType == value);
         toks.popFront;
     }
-    string s = "int x = 42;";
-    auto toks = s.tokenize;
-    nextIs!Ident(toks, s[0..3], Ident("int"));
-    nextIs!Ident(toks, s[4..5], Ident("x"));
-    nextIs!Sym(toks, s[6..7], sym!"=");
-    nextIs!Int(toks, s[8..10], Int(BigInt(42)));
-    nextIs!Sym(toks, s[10..11], sym!";");
-    nextIs!Eof(toks, s[11..11], Eof());
+
+    {
+        string s = "int س = 42;";
+        auto toks = s.tokenize;
+        nextIs(toks, s[0..3], Ident("int"));
+        nextIs(toks, s[4..6], Ident("س"));
+        nextIs(toks, s[7..8], sym!"=");
+        nextIs(toks, s[9..11], Int(BigInt(42)));
+        nextIs(toks, s[11..12], sym!";");
+        nextIs(toks, s[12..12], Eof());
+    }
+
+    {
+        string s = "1-2";
+        auto toks = s.tokenize;
+        nextIs(toks, s[0..1], Int(BigInt(1)));
+        nextIs(toks, s[1..2], sym!"-");
+        nextIs(toks, s[2..3], Int(BigInt(2)));
+    }
+
+    {
+        string s = "1--2";
+        auto toks = s.tokenize;
+        nextIs(toks, s[0..1], Int(BigInt(1)));
+        nextIs(toks, s[1..2], sym!"-");
+        nextIs(toks, s[2..4], Int(BigInt(-2)));
+    }
 }
 
 template isTokRange(R)
@@ -264,6 +195,9 @@ private struct Lexer(S) {
     private S src;
     private size_t idx;
     private Tok tok;
+    // Used for disambiguation between signed (+/-) `Int`s
+    // and the binary operators plus and minus.
+    private TokType prevTok = TokType(Eof());
 
     this(string src)
     {
@@ -289,6 +223,7 @@ private struct Lexer(S) {
     void popFront() 
     {
         import std.uni : isWhite;
+        prevTok = tok.type;
         skipWhile!isWhite();
         if (idx >= src.length + 1)
         {
@@ -367,7 +302,7 @@ private struct Lexer(S) {
                 idx++;
                 break;
             default:
-                if (isDigit(ch1))
+                if (isDigit(ch1) && prevTok.has!Sym)
                 {
                     neg = true;
                     ch0 = ch1;
@@ -442,7 +377,7 @@ private struct Lexer(S) {
             idx += (ch1 == '=');
             goto ret;
         case '+':
-            if (isDigit(ch1))
+            if (isDigit(ch1) && prevTok.has!Sym)
             {
                 ch0 = ch1;
                 ch1 = ch2;
@@ -633,7 +568,7 @@ private static immutable xidContSet = toTrie!1(unicode.XID_Continue);
 private static immutable asciiIdentStartSet = genAsciiIdentSet(xidStartSet);
 private static immutable asciiIdentContSet = genAsciiIdentSet(xidContSet);
 
-auto genAsciiIdentSet(T)(auto ref T xidSet)
+private auto genAsciiIdentSet(T)(auto ref T xidSet)
 {
     bool[128] lut;
     foreach (ch; 0..128)

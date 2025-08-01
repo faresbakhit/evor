@@ -16,7 +16,7 @@ import std.sumtype : SumType, This;
 import std.typecons : Tuple, Nullable;
 
 alias LinProgram = LinFunc[];
-alias LinFunc = Tuple!(string, "name", LinType*, "retType", LinVar[], "params", LinBlock, "block", uint, "varCount");
+alias LinFunc = Tuple!(string, "name", LinType*, "retType", LinVar[], "params", LinBlock, "block");
 alias LinBlock = LinStmt*[];
 alias LinStmt = SumType!(
     Tuple!(LinExpr, "cond", This*[], "ifBlock", This*[], "elseBlock"), // LinIf
@@ -43,26 +43,11 @@ alias VarId = uint;
 alias LinUn = Tuple!(LinType*, "type", UnOp, "op", Atom, "atom");
 alias LinBin = Tuple!(LinType*, "type", BinOp, "op", Atom, "lhs", Atom, "rhs");
 alias LinCall = Tuple!(LinType*, "type", string, "func", Atom[], "args");
-alias Err = Tuple!(string, "message", Span, "span");
-alias Result = ResultWith!(Err);
+
 alias type = firstField;
 
-private auto result(T)(T ok) => Result!T(ok);
-private auto result(T)(Err err) => Result!T(err);
-
-import evorc.ast;
-import evorc.display;
-import evorc.span;
-import evorc.utils.result;
-import evorc.utils.sumtype;
-import evorc.utils.unit;
-import std.algorithm;
-import std.array;
-import std.conv;
-import std.format;
-import std.range;
-import std.sumtype;
-import std.typecons;
+alias Err = Tuple!(string, "message", Span, "span");
+alias Result = ResultWith!(Err);
 
 Result!LinProgram lin(Program prog)
 {
@@ -93,6 +78,25 @@ Result!LinProgram lin(Program prog)
                .collect;
 };
 
+private
+{
+import evorc.ast;
+import evorc.display;
+import evorc.span;
+import evorc.utils.result;
+import evorc.utils.sumtype;
+import evorc.utils.unit;
+import std.algorithm;
+import std.array;
+import std.conv;
+import std.format;
+import std.range;
+import std.sumtype;
+import std.typecons;
+
+auto result(T)(T ok) => Result!T(ok);
+auto result(T)(Err err) => Result!T(err);
+
 Result!LinFunc lin(Func fn, ref Record rec)
 {
     Record fnRec = rec.dup;
@@ -105,7 +109,7 @@ Result!LinFunc lin(Func fn, ref Record rec)
         )
         .array;
     auto block = lin(fn.block, fnRec)?;
-    return LinFunc(fn.decl.ident.name, retType, params, block, fnRec.varCount).result;
+    return LinFunc(fn.decl.ident.name, retType, params, block).result;
 }
 
 LinType* lin(Type* type) => (*type).match!(
@@ -179,12 +183,12 @@ Result!Unit lin(Assign assign, ref LinBlock block, ref Record rec)
     {
         auto ident = lhsExpr.get!Ident;
         auto var = rec.get(ident)?;
-        auto atom = atomize(assign.rhs, block, rec)?;
-        LinExpr expr = LinExpr(atom);
+        auto expr = lin(assign.rhs, block, rec)?;
         if (!binOp.isNull)
         {
             auto op = binOp.get;
-            auto type = op.on(var.type, atom.type, ident.span, assign.rhs.span)?;
+            auto type = op.on(var.type, expr.type, ident.span, assign.rhs.span)?;
+            auto atom = atomize(expr, block, rec);
             expr = LinExpr(LinBin(type, op, Atom(var), atom));
         }
         if (!var.type.equalTo(expr.type))
@@ -202,16 +206,16 @@ Result!Unit lin(Assign assign, ref LinBlock block, ref Record rec)
             auto ident = lhsDerefExpr.get!Ident;
             auto var = rec.get(ident)?;
             if (!(*var.type).has!LinPointer)
-                return Err("dereferencing variable '%s' of primitive type `%s`."
+                return Err("dereferencing variable '%s' of primitive type `%s`"
                            .format(ident.name, var.type.display), assign.lhs.span)
                        .result;
-            auto atom = atomize(assign.rhs, block, rec)?;
-            auto expr = LinExpr(atom);
+            auto expr = lin(assign.rhs, block, rec)?;
             auto pointeeType = (*var.type).get!LinPointer.pointee;
             if (!binOp.isNull)
             {
                 auto op = binOp.get;
-                auto type = op.on(pointeeType, atom.type, assign.lhs.span, assign.rhs.span)?;
+                auto type = op.on(pointeeType, expr.type, assign.lhs.span, assign.rhs.span)?;
+                auto atom = atomize(expr, block, rec);
                 auto tempVar = rec.next(type);
                 auto tempExpr = LinExpr(LinUn(pointeeType, UnOp.pointerDereference, Atom(var)));
                 block ~= new LinStmt(LinAssign(LValue(tempVar), tempExpr));
@@ -232,13 +236,13 @@ Result!Unit lin(Assign assign, ref LinBlock block, ref Record rec)
                 return Err("dereferencing an expression of primitive type `%s`"
                            .format(tempLhsVar.type.display), assign.lhs.span)
                        .result;
-            auto atom = atomize(assign.rhs, block, rec)?;
-            auto expr = LinExpr(atom);
+            auto expr = lin(assign.rhs, block, rec)?;
             auto pointeeType = (*tempLhsVar.type).get!LinPointer.pointee;
             if (!binOp.isNull)
             {
                 auto op = binOp.get;
-                auto type = op.on(pointeeType, atom.type, assign.lhs.span, assign.rhs.span)?;
+                auto type = op.on(pointeeType, expr.type, assign.lhs.span, assign.rhs.span)?;
+                auto atom = atomize(expr, block, rec);
                 auto tempRhsVar = rec.next(type);
                 auto tempRhsExpr = LinExpr(LinUn(pointeeType, UnOp.pointerDereference, Atom(tempLhsVar)));
                 block ~= new LinStmt(LinAssign(LValue(tempRhsVar), tempRhsExpr));
@@ -366,7 +370,17 @@ Result!LinExpr lin(Call call, ref LinBlock block, ref Record rec)
     return LinExpr(LinCall(funcSpec.retType, call.ident.name, args)).result;
 }
 
-private Result!Atom atomize(Expr* expr, ref LinBlock block, ref Record rec) => (*expr).match!(
+Atom atomize(LinExpr expr, ref LinBlock block, ref Record rec) => expr.match!(
+    (Atom atom) => atom,
+    (_)
+    {
+        auto tempVar = rec.next(expr.type);
+        block ~= new LinStmt(LinAssign(LValue(tempVar), expr));
+        return Atom(tempVar);
+    },
+);
+
+Result!Atom atomize(Expr* expr, ref LinBlock block, ref Record rec) => (*expr).match!(
     (Bool bool_) => Atom(LinBool(new LinType(PrimitiveType.bool_), bool_.value)).result,
     (Int int_) => Atom(LinInt(new LinType(PrimitiveType.int_), int_.value)).result,
     (Ident ident)
@@ -383,7 +397,7 @@ private Result!Atom atomize(Expr* expr, ref LinBlock block, ref Record rec) => (
     },
 );
 
-private Result!(LinType*) on(BinOp binOp, LinType* lhsType, LinType* rhsType, Span lhsSpan, Span rhsSpan)
+Result!(LinType*) on(BinOp binOp, LinType* lhsType, LinType* rhsType, Span lhsSpan, Span rhsSpan)
 {
     with (BinOp) final switch (binOp)
     {
@@ -456,7 +470,7 @@ private Result!(LinType*) on(BinOp binOp, LinType* lhsType, LinType* rhsType, Sp
     }
 }
 
-private Result!(LinType*) on(UnOp unOp, LinType* type, Span span)
+Result!(LinType*) on(UnOp unOp, LinType* type, Span span)
 {
     with (UnOp) final switch (unOp)
     {
@@ -567,3 +581,22 @@ struct FuncSpec
     LinType* retType;
     LinType*[] argTypes;
 }
+
+Nullable!BinOp binOp(AssignMod assignMod)
+{
+    with (BinOp) with (AssignMod) final switch (assignMod)
+    {
+    case none: return Nullable!BinOp.init;
+    case add: return BinOp.add.nullable;
+    case sub: return BinOp.sub.nullable;
+    case mul: return BinOp.mul.nullable;
+    case div: return BinOp.div.nullable;
+    case rem: return BinOp.rem.nullable;
+    case bitwiseAnd: return BinOp.bitwiseAnd.nullable;
+    case bitwiseOr: return BinOp.bitwiseOr.nullable;
+    case bitwiseXor: return BinOp.bitwiseXor.nullable;
+    case bitwiseLeftShift: return BinOp.bitwiseLeftShift.nullable;
+    case bitwiseRightShift: return BinOp.bitwiseRightShift.nullable;
+    }
+}
+} // private

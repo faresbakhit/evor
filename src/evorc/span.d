@@ -18,5 +18,8 @@ module evorc.span;
 alias Span = string;
 // Yep that's it, no crazy struct with 20 methods.
 
+// not used currently, but it's here if needed
+immutable Span invalidSpan = (cast(char*)(null))[0..0];
+
 public import evorc.utils.array : joinSpans = joinSlices;
 // Eh, we kind of really need this
