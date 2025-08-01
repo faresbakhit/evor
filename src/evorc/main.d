@@ -16,19 +16,20 @@ int main(string[] args)
         .tokenize
         .parse
         .match!(
-            (evorc.ast.Program prog) { prog.tac.dbg.writeln; return 0; },
-            // (Program prog) => prog.lin.match!(
-            //     (LinProgram prog)
-            //     {
-            //         x64(prog, stdout.lockingTextWriter());
-            //         return 0;
-            //     },
-            //     (evorc.lin.Err err)
-            //     {
-            //         stderr.writeln(err.dbg);
-            //         return 1;
-            //     }
-            // ),
+            (evorc.ast.Program prog)
+            {
+                return prog.tac.match!(
+                    (evorc.tac.Program prog)
+                    {
+                        x86(prog, stdout.lockingTextWriter());
+                        return 0;
+                    },
+                    (evorc.tac.Err err)
+                    {
+                        return 1;
+                    }
+                );
+            },
             (evorc.ast.Err err)
             {
                 stderr.writeln(err.dbg);

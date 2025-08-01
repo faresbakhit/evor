@@ -9,20 +9,19 @@ module evorc.tac;
 
 public import evorc.ast : BinOp, UnOp, PrimitiveType;
 public import evorc.span : Span;
-public import std.bigint : BigInt;
 
 import evorc.utils.result : ResultWith;
 import evorc.utils.sumtype : firstField;
 import std.sumtype : SumType;
 import std.typecons : Tuple;
 
-alias Program = Func[];
+alias Program = Tuple!(Func[], "funcs", Record, "rec");
 
-alias Func = Tuple!(string, "name", Type, "retType", Var[], "params", Block, "insts");
+alias Func = Tuple!(FuncId, "id", Type, "retType", Var[], "params", Block, "instrs");
 alias FuncId = uint;
-alias Block = Instr[];
+alias Block = Inst[];
 
-alias Instr = SumType!(Label, Jmp, Jcc, Bin, Un, Assign, Load, Store, Return, Leave);
+alias Inst = SumType!(Label, Jmp, Jcc, Bin, Un, Assign, Load, Store, Param, Call, Return, Leave);
 alias Label = Tuple!(LabelId, "id");
 alias LabelId = uint;
 alias Jmp = Tuple!(Label, "label");
@@ -33,14 +32,14 @@ alias Assign = Tuple!(Var, "dest", Atom, "src");
 alias Load = Tuple!(Var, "dest", Atom, "srcPtr");
 alias Store = Tuple!(Var, "destPtr", Atom, "src");
 alias Param = Tuple!(Atom, "arg");
-alias Call = Tuple!(FuncId, "funcId");
+alias Call = Tuple!(Var, "dest", FuncId, "funcId");
 alias Return = Tuple!(Atom, "val");
 alias Leave = Tuple!();
 
 alias Atom = SumType!(Var, Int, Bool);
 alias Var = Tuple!(Type, "type", VarId, "id");
 alias VarId = uint;
-alias Int = Tuple!(Type, "type", BigInt, "value");
+alias Int = Tuple!(Type, "type", int, "value");
 alias Bool = Tuple!(Type, "type", bool, "value");
 alias type = firstField;
 
@@ -56,6 +55,11 @@ alias Result = ResultWith!(Err);
 Result!Program tac(a.Program prog)
 {
     Record rec;
+    return tac(prog, rec);
+}
+
+Result!Program tac(a.Program prog, ref Record rec)
+{
     rec.varsStack.reserve(16);
     foreach (item; prog)
     {
@@ -78,20 +82,45 @@ Result!Program tac(a.Program prog)
             }
         );
     }
-    return prog.filter!(item => item.has!(a.Func))
-               .map!(item => tac(item.get!(a.Func), rec))
-               .collect;
+    auto funcs = prog.filter!(item => item.has!(a.Func)).map!(item => tac(item.get!(a.Func), rec)).collect?;
+    return Program(funcs, rec).result;
 };
 
 
-struct FuncSpec
-{
-    Type retType;
-    Type[] paramTypes;
-}
-
 struct Record
 {
+    Type getType(TypeId typeId) const
+    {
+        return types[typeId];
+    }
+
+    string getFuncName(FuncId funcId) const
+    {
+        return funcs[funcId];
+    }
+
+private:
+    Var[string][] varsStack;
+    uint varCount;
+
+    FuncSpec[string] funcSpecs;
+    string[] funcs;
+
+    TypeId[Type] typesMap;
+    Type[] types;
+
+    uint labelCount;
+
+    void scopeEnter()
+    {
+        varsStack ~= (Var[string]).init;
+    }
+
+    void scopeExit()
+    {
+        varsStack.popBack();
+    }
+
     Nullable!Var getVar(string name)
     {
         foreach_reverse (varsTable; varsStack)
@@ -109,11 +138,44 @@ struct Record
         return var.get.result;
     }
 
+    Result!Var putVar(Type type, string name, lazy Err onExists)
+    {
+        if (name in varsStack[$-1])
+            return onExists().result;
+        auto var = varsStack[$-1][name] = Var(type, varCount++);
+        auto r = var.result;
+        return r;
+    }
+
+    Var putVar(Type type, string name)
+    {
+        return varsStack[$-1][name] = Var(type, varCount++);
+    }
+
+    Var putVar(Type type)
+    {
+        return Var(type, varCount++);
+    }
+
     Nullable!FuncSpec getFuncSpec(string name)
     {
         auto spec = name in funcSpecs;
         if (spec !is null) return nullable(*spec);
         return Nullable!FuncSpec.init;
+    }
+
+    Result!FuncSpec getFuncSpec(Ident ident)
+    {
+        auto spec = getFuncSpec(ident.name);
+        if (spec.isNull) return Err("undefined function", ident.span).result;
+        return spec.get.result;
+    }
+
+    void putFuncSpec(string name, Type retType, Type[] paramTypes)
+    {
+        auto id = cast(uint)funcs.length;
+        funcs ~= name;
+        funcSpecs[name] = FuncSpec(id, retType, paramTypes);
     }
 
     TypeId getTypeId(Type type)
@@ -127,56 +189,9 @@ struct Record
         return typeId;
     }
 
-    Type getType(TypeId typeId)
-    {
-        return types[typeId];
-    }
-
-private:
-    Var[string][] varsStack;
-    uint varsCount;
-    FuncSpec[string] funcSpecs;
-    TypeId[Type] typesMap;
-    Type[] types;
-    uint labelsCount;
-
-    void scopeEnter()
-    {
-        varsStack ~= (Var[string]).init;
-    }
-
-    void scopeExit()
-    {
-        varsStack.popBack();
-    }
-
-    Result!Var putVar(Type type, string name, lazy Err onExists)
-    {
-        if (name in varsStack[$-1])
-            return onExists().result;
-        auto var = varsStack[$-1][name] = Var(type, varsCount++);
-        auto r = var.result;
-        return r;
-    }
-
-    Var putVar(Type type, string name)
-    {
-        return varsStack[$-1][name] = Var(type, varsCount++);
-    }
-
-    Var putVar(Type type)
-    {
-        return Var(type, varsCount++);
-    }
-
-    void putFuncSpec(string name, Type retType, Type[] argTypes)
-    {
-        funcSpecs[name] = FuncSpec(retType, argTypes);
-    }
-
     Label nextLabel()
     {
-        return Label(labelsCount++);
+        return Label(labelCount++);
     }
 }
 
@@ -215,22 +230,17 @@ Result!Func tac(a.Func fn, ref Record rec)
         )
         .collect;
     auto params = paramsResult?;
-    auto block = tac(fn.block, rec)?;
-    rec.scopeExit();
-    return Func(fn.decl.ident.name, retType, params, block).result;
-}
-
-Result!Block tac(a.Block block, ref Record rec)
-{
-    Block instrs;
-    foreach (stmt; block)
+    Inst[] instrs;
+    foreach (stmt; fn.block)
     {
         tac(stmt, instrs, rec)?;
     }
-    return instrs.result;
+    rec.scopeExit();
+    auto id = rec.getFuncSpec(fn.decl.ident.name).get.funcId;
+    return Func(id, retType, params, instrs).result;
 }
 
-Result!Unit tac(a.Block block, ref Block instrs, ref Record rec)
+Result!Unit tac(a.Block block, ref Inst[] instrs, ref Record rec)
 {
     rec.scopeEnter();
     foreach (stmt; block)
@@ -255,12 +265,12 @@ Result!Unit tac(a.If if_, ref Block block, ref Record rec)
                .result;
     auto thenLabel = rec.nextLabel();
     auto endLabel = rec.nextLabel();
-    block ~= Instr(Jcc(cond, thenLabel));
+    block ~= Inst(Jcc(cond, thenLabel));
     tac(if_.elseBlock, block, rec)?;
-    block ~= Instr(Jmp(endLabel));
-    block ~= Instr(thenLabel);
+    block ~= Inst(Jmp(endLabel));
+    block ~= Inst(thenLabel);
     tac(if_.ifBlock, block, rec)?;
-    block ~= Instr(endLabel);
+    block ~= Inst(endLabel);
     return unit.result;
 }
 
@@ -268,11 +278,11 @@ Result!Unit tac(a.Return ret, ref Block block, ref Record rec)
 {
     if (ret.expr.isNull)
     {
-        block ~= Instr(Leave());
+        block ~= Inst(Leave());
         return unit.result;
     }
     auto atom = atom(ret.expr.bitCast!(a.Expr*), block, rec)?;
-    block ~= Instr(Return(atom));
+    block ~= Inst(Return(atom));
     return unit.result;
 }
 
@@ -310,7 +320,7 @@ Result!Unit tac(Ident ident, Nullable!BinOp modBinOp, a.Expr* expr, ref Block bl
         auto op = modBinOp.get;
         auto tempType = op.on(dest.type, src.type, ident.span, expr.span, rec)?;
         auto temp = rec.putVar(tempType);
-        block ~= Instr(Bin(temp, op, Atom(dest), src));
+        block ~= Inst(Bin(temp, op, Atom(dest), src));
         src = Atom(temp);
     }
     if (dest.type != src.type)
@@ -318,7 +328,7 @@ Result!Unit tac(Ident ident, Nullable!BinOp modBinOp, a.Expr* expr, ref Block bl
                    .format(src.type.display(rec),
                            ident.name,
                            dest.type.display(rec)), expr.span).result;
-    block ~= Instr(Assign(dest, src));
+    block ~= Inst(Assign(dest, src));
     return unit.result;
 }
 
@@ -343,8 +353,8 @@ Result!Unit tac(a.Expr* destExpr, Nullable!BinOp modBinOp, a.Expr* srcExpr, ref 
         auto t1 = rec.putVar(pointeeType);
         auto t2 = rec.putVar(t2Type);
         block ~= [
-            Instr(Load(t1, dest)),
-            Instr(Bin(t2, op, Atom(t1), src)),
+            Inst(Load(t1, dest)),
+            Inst(Bin(t2, op, Atom(t1), src)),
         ];
         src = Atom(t2);
     }
@@ -352,7 +362,7 @@ Result!Unit tac(a.Expr* destExpr, Nullable!BinOp modBinOp, a.Expr* srcExpr, ref 
         return Err("expression of type `%s` not assignable to expression dereference of type `%s`"
                    .format(src.type.display(rec), pointeeType.display(rec)), srcExpr.span)
                .result;
-    block ~= Instr(Store(dest.get!Var, src));
+    block ~= Inst(Store(dest.get!Var, src));
     return unit.result;
 }
 
@@ -380,7 +390,11 @@ Result!Atom atom(a.Bool bool_, ref Block block, ref Record rec)
 
 Result!Atom atom(a.Int int_, ref Block block, ref Record rec)
 {
-    return Atom(Int(Type(Primitive.int_), int_.value)).result;
+    if (int_.value < int.min || int_.value > int.max)
+    {
+        return Err("literal out of range for type `int`", int_.span).result;
+    }
+    return Atom(Int(Type(Primitive.int_), int_.value.toInt())).result;
 }
 
 Result!Atom atom(a.Ident ident, ref Block block, ref Record rec)
@@ -398,7 +412,7 @@ Result!Atom atom(a.Un un, ref Block block, ref Record rec)
     auto atom = atom(un.expr, block, rec)?;
     auto type = un.op.on(atom.type, un.span, rec)?;
     auto temp = rec.putVar(type);
-    block ~= Instr(Un(temp, un.op, atom));
+    block ~= Inst(Un(temp, un.op, atom));
     return Atom(temp).result;
 }
 
@@ -408,13 +422,37 @@ Result!Atom atom(a.Bin bin, ref Block block, ref Record rec)
     auto rhs = atom(bin.rhs, block, rec)?;
     auto type = bin.op.on(lhs.type, rhs.type, bin.lhs.span, bin.rhs.span, rec)?;
     auto temp = rec.putVar(type);
-    block ~= Instr(Bin(temp, bin.op, lhs, rhs));
+    block ~= Inst(Bin(temp, bin.op, lhs, rhs));
     return Atom(temp).result;
 }
 
 Result!Atom atom(a.Call call, ref Block block, ref Record rec)
 {
-    return assert(0);
+    auto args = call.args.map!(arg => atom(arg, block, rec)).collect?;
+    auto funcSpec = rec.getFuncSpec(call.ident)?;
+    if (args.length != funcSpec.paramTypes.length)
+        return Err("function `%s` expects %s argument%s, but %s%s %s given"
+                   .format(call.ident.name,
+                           funcSpec.paramTypes.length,
+                           funcSpec.paramTypes.length == 1 ? "" : "s",
+                           args.length < funcSpec.paramTypes.length ? "only " : "",
+                           args.length,
+                           args.length == 1 ? "was" : "were"), call.span).result;
+    foreach (index, a, b; lockstep(args.map!type, funcSpec.paramTypes))
+    {
+        if (a != b)
+        {
+            return Err("function `%s` expects argument %s to be of type `%s`, found `%s`"
+                       .format(call.ident.name,
+                               index + 1,
+                               b.display(rec),
+                               a.display(rec)), call.args[index].span).result;
+        }
+        block ~= Inst(Param(args[index]));
+    }
+    auto temp = rec.putVar(funcSpec.retType);
+    block ~= Inst(Call(temp, funcSpec.funcId));
+    return Atom(temp).result;
 }
 
 bool isLValue(a.Expr* expr) => (*expr).match!(
@@ -551,5 +589,12 @@ Nullable!BinOp binOp(a.AssignMod assignMod)
     case bitwiseLeftShift: return BinOp.bitwiseLeftShift.nullable;
     case bitwiseRightShift: return BinOp.bitwiseRightShift.nullable;
     }
+}
+
+struct FuncSpec
+{
+    uint funcId;
+    Type retType;
+    Type[] paramTypes;
 }
 } // private
