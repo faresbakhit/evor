@@ -28,6 +28,7 @@ void x86(Writer)(Program prog, auto ref Writer sink)
 private
 {
 import evorc.tac;
+import evorc.utils.sumtype;
 import std.algorithm;
 import std.array;
 import std.conv;
@@ -65,7 +66,7 @@ void x86(W)(auto ref W s, const ref Record rec, Func func)
 
     foreach (inst; func.instrs)
     {
-        x86(ss, stack, inst);
+        x86(ss, stack, rec, inst);
     }
 
     auto nextMultipleOf16 = (int n) => (n + 15) & ~15;
@@ -74,22 +75,22 @@ void x86(W)(auto ref W s, const ref Record rec, Func func)
     s.directive("size", funcName, ".-" ~ funcName);
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Inst inst)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Inst inst)
 {
-    inst.match!(i => x86(s, stack, i));
+    inst.match!(i => x86(s, stack, rec, i));
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Label label)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Label label)
 {
     s.label(label);
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Jmp jmp)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Jmp jmp)
 {
     s.instr(Instr.jmp, jmp.label);
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Jcc jcc)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Jcc jcc)
 {
     jcc.cond.match!(
         (Var var)
@@ -108,7 +109,7 @@ void x86(W)(auto ref W s, ref Stack stack, Jcc jcc)
     );
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Bin bin)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Bin bin)
 {
     auto dest = stack.addrOf(bin.dest);
 
@@ -117,27 +118,35 @@ void x86(W)(auto ref W s, ref Stack stack, Bin bin)
         alias additive = match!(
             (Var var1, Var var2)
             {
-                s.instr(Instr.mov, Reg.eax, stack.addrOf(var1));
-                s.instr(Instr.add, Reg.eax, stack.addrOf(var2));
-                s.instr(Instr.mov, dest, Reg.eax);
+                auto var1Mem = stack.addrOf(var1);
+                auto var2Mem = stack.addrOf(var2);
+                auto temp = reg(var1Mem.size, Reg.rax);
+utils.sumtype               s.instr(Instr.mov, temp, var1Mem);
+                s.instr(instr, temp, var2Mem);
+                s.instr(Instr.mov, dest, temp);
             },
             (Var var, atom)
             {
-                s.instr(Instr.mov, Reg.eax, stack.addrOf(var));
-                s.instr(Instr.add, Reg.eax, atom);
-                s.instr(Instr.mov, dest, Reg.eax);
+                auto varMem = stack.addrOf(var);
+                auto temp = reg(varMem.size, Reg.rax);
+                s.instr(Instr.mov, temp, varMem);
+                s.instr(instr, temp, atom);
+                s.instr(Instr.mov, dest, temp);
             },
             (atom, Var var)
             {
-                s.instr(Instr.mov, Reg.eax, atom);
-                s.instr(Instr.add, Reg.eax, stack.addrOf(var));
-                s.instr(Instr.mov, dest, Reg.eax);
+                auto varMem = stack.addrOf(var);
+                auto temp = reg(varMem.size, Reg.rax);
+                s.instr(Instr.mov, temp, atom);
+                s.instr(instr, temp, varMem);
+                s.instr(Instr.mov, dest, temp);
             },
             (atom1, atom2)
             {
-                s.instr(Instr.mov, Reg.eax, atom1);
-                s.instr(Instr.add, Reg.eax, atom2);
-                s.instr(Instr.mov, dest, Reg.eax);
+                auto temp = reg(sizeof(atom1.type), Reg.rax);
+                s.instr(Instr.mov, temp, atom1);
+                s.instr(instr, temp, atom2);
+                s.instr(Instr.mov, dest, temp);
             },
         );
     }
@@ -176,64 +185,35 @@ void x86(W)(auto ref W s, ref Stack stack, Bin bin)
 
     with (BinOp) final switch (bin.op)
     {
-    case add:
-        additive!(Instr.add)(bin.lhs, bin.rhs);
-        break;
-    case sub:
-        additive!(Instr.sub)(bin.lhs, bin.rhs);
-        break;
-    case mul:
-        break;
-    case div:
-        break;
-    case rem:
-        break;
+    case add: return additive!(Instr.add)(bin.lhs, bin.rhs);
+    case sub: return additive!(Instr.sub)(bin.lhs, bin.rhs);
+    case mul: break;
+    case div: break;
+    case rem: break;
+    case bitwiseXor: return additive!(Instr.xor)(bin.lhs, bin.rhs);
+    case bitwiseLeftShift: break;
+    case bitwiseRightShift: break;
     case bitwiseAnd:
-        break;
+    case logicalAnd: return additive!(Instr.and)(bin.lhs, bin.rhs);
     case bitwiseOr:
-        break;
-    case bitwiseXor:
-        break;
-    case bitwiseLeftShift:
-        break;
-    case bitwiseRightShift:
-        break;
-    case logicalAnd:
-        break;
-    case logicalOr:
-        break;
-    case equalTo:
-        cmp!(Instr.sete, Instr.setne)(bin.lhs, bin.rhs);
-        break;
-    case notEqualTo:
-        cmp!(Instr.setne, Instr.sete)(bin.lhs, bin.rhs);
-        break;
-    case lessThan:
-        cmp!(Instr.setl, Instr.setge)(bin.lhs, bin.rhs);
-        break;
-    case greaterThan:
-        cmp!(Instr.setg, Instr.setle)(bin.lhs, bin.rhs);
-        break;
-    case lessThanOrEqualTo:
-        cmp!(Instr.setle, Instr.setg)(bin.lhs, bin.rhs);
-        break;
-    case greaterThanOrEqualTo:
-        cmp!(Instr.setge, Instr.setl)(bin.lhs, bin.rhs);
-        break;
-    case arraySubscript:
-        break;
-    case memberAccess:
-        break;
-    case memberAccessThroughPointer:
-        break;
+    case logicalOr: return additive!(Instr.or)(bin.lhs, bin.rhs);
+    case equalTo: return cmp!(Instr.sete, Instr.setne)(bin.lhs, bin.rhs);
+    case notEqualTo: return cmp!(Instr.setne, Instr.sete)(bin.lhs, bin.rhs);
+    case lessThan: return cmp!(Instr.setl, Instr.setge)(bin.lhs, bin.rhs);
+    case greaterThan: return cmp!(Instr.setg, Instr.setle)(bin.lhs, bin.rhs);
+    case lessThanOrEqualTo: return cmp!(Instr.setle, Instr.setg)(bin.lhs, bin.rhs);
+    case greaterThanOrEqualTo: return cmp!(Instr.setge, Instr.setl)(bin.lhs, bin.rhs);
+    case arraySubscript: break;
+    case memberAccess: break;
+    case memberAccessThroughPointer: break;
     }
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Un un)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Un un)
 {
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Assign assign)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Assign assign)
 {
     auto dest = stack.addrOf(assign.dest);
     assign.src.match!(
@@ -249,23 +229,41 @@ void x86(W)(auto ref W s, ref Stack stack, Assign assign)
     );
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Load load)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Load load)
 {
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Store store)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Store store)
 {
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Param param)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Call call)
 {
+    void argInto(Reg destReg)(Atom arg) {
+        auto reg = reg(sizeof(arg.type), destReg);
+        arg.match!(
+            (Var var) => s.instr(Instr.mov, reg, stack.addrOf(var)),
+            atom => s.instr(Instr.mov, reg, atom),
+        );
+    }
+
+    if (call.args.length > 0) argInto!(Reg.rdi)(call.args[0]);
+    if (call.args.length > 1) argInto!(Reg.rsi)(call.args[1]);
+    if (call.args.length > 2) argInto!(Reg.rdx)(call.args[2]);
+    if (call.args.length > 3) argInto!(Reg.rcx)(call.args[3]);
+    if (call.args.length > 4) argInto!(Reg.r8)(call.args[4]);
+    if (call.args.length > 5) argInto!(Reg.r9)(call.args[5]);
+
+    s.instr(Instr.call, rec.getFuncName(call.funcId));
+
+    if (!call.dest.type.contains(Primitive.void_))
+    {
+        auto destReg = reg(sizeof(call.dest.type), Reg.rax);
+        s.instr(Instr.mov, stack.addrOf(call.dest), destReg);
+    }
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Call call)
-{
-}
-
-void x86(W)(auto ref W s, ref Stack stack, Return ret)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Return ret)
 {
     ret.val.match!(
         (Var var)
@@ -284,7 +282,7 @@ void x86(W)(auto ref W s, ref Stack stack, Return ret)
     s.instr(Instr.ret);
 }
 
-void x86(W)(auto ref W s, ref Stack stack, Leave leave)
+void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Leave leave)
 {
     s.instr(Instr.leave);
     s.instr(Instr.ret);
@@ -554,7 +552,7 @@ string arg(Label label)
     return format(".L%d", label.id);
 }
 
-string arg(Int int_)
+string arg(I32 int_)
 {
     return to!string(int_.value);
 }
@@ -562,6 +560,11 @@ string arg(Int int_)
 string arg(Bool bool_)
 {
     return to!string(cast(int)bool_.value);
+}
+
+string arg(string s)
+{
+    return s;
 }
 
 struct Mem
@@ -598,7 +601,7 @@ uint sizeof(Type type) => type.match!(
     {
         with (Primitive) final switch (primitive)
         {
-        case int_: return 4;
+        case i32: return 4;
         case bool_: return 1;
         case void_: return 0;
         }

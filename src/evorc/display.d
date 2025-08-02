@@ -50,16 +50,11 @@ string display(PrimitiveType primitiveType)
 {
     with (PrimitiveType) final switch (primitiveType)
     {
-    case int_: return "int";
+    case i32: return "i32";
     case bool_: return "bool";
     case void_: return "void";
     }
 }
-
-string display(LinType* type) => (*type).match!(
-    (LinPointer ptr) => display(ptr.pointee) ~ "*",
-    (PrimitiveType primitiveType) => primitiveType.display,
-);
 
 string display(evorc.tac.Type type, ref evorc.tac.Record rec) => type.match!(
     (evorc.tac.Primitive primitive) => primitive.display,

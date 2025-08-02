@@ -21,7 +21,7 @@ alias Func = Tuple!(FuncId, "id", Type, "retType", Var[], "params", Block, "inst
 alias FuncId = uint;
 alias Block = Inst[];
 
-alias Inst = SumType!(Label, Jmp, Jcc, Bin, Un, Assign, Load, Store, Param, Call, Return, Leave);
+alias Inst = SumType!(Label, Jmp, Jcc, Bin, Un, Assign, Load, Store, Call, Return, Leave);
 alias Label = Tuple!(LabelId, "id");
 alias LabelId = uint;
 alias Jmp = Tuple!(Label, "label");
@@ -31,15 +31,14 @@ alias Un = Tuple!(Var, "dest", UnOp, "op", Atom, "src");
 alias Assign = Tuple!(Var, "dest", Atom, "src");
 alias Load = Tuple!(Var, "dest", Atom, "srcPtr");
 alias Store = Tuple!(Var, "destPtr", Atom, "src");
-alias Param = Tuple!(Atom, "arg");
-alias Call = Tuple!(Var, "dest", FuncId, "funcId");
+alias Call = Tuple!(Var, "dest", FuncId, "funcId", Atom[], "args");
 alias Return = Tuple!(Atom, "val");
 alias Leave = Tuple!();
 
-alias Atom = SumType!(Var, Int, Bool);
+alias Atom = SumType!(Var, I32, Bool);
 alias Var = Tuple!(Type, "type", VarId, "id");
 alias VarId = uint;
-alias Int = Tuple!(Type, "type", int, "value");
+alias I32 = Tuple!(Type, "type", int, "value");
 alias Bool = Tuple!(Type, "type", bool, "value");
 alias type = firstField;
 
@@ -289,7 +288,7 @@ Result!Unit tac(a.Return ret, ref Block block, ref Record rec)
 Result!Unit tac(a.VarDecl varDecl, ref Block block, ref Record rec)
 {
     auto var = rec.putVar(tac(varDecl.type, rec), varDecl.ident.name);
-    if (var.type.contains(PrimitiveType.void_))
+    if (var.type.contains(Primitive.void_))
         return Err("variable declared of type `void`",  varDecl.ident.span).result;
     if (varDecl.def.isNull) return unit.result;
     tac(varDecl.ident, Nullable!BinOp.init, varDecl.def.bitCast!(a.Expr*), block, rec)?;
@@ -394,7 +393,7 @@ Result!Atom atom(a.Int int_, ref Block block, ref Record rec)
     {
         return Err("literal out of range for type `int`", int_.span).result;
     }
-    return Atom(Int(Type(Primitive.int_), int_.value.toInt())).result;
+    return Atom(I32(Type(Primitive.i32), int_.value.toInt())).result;
 }
 
 Result!Atom atom(a.Ident ident, ref Block block, ref Record rec)
@@ -448,10 +447,9 @@ Result!Atom atom(a.Call call, ref Block block, ref Record rec)
                                b.display(rec),
                                a.display(rec)), call.args[index].span).result;
         }
-        block ~= Inst(Param(args[index]));
     }
     auto temp = rec.putVar(funcSpec.retType);
-    block ~= Inst(Call(temp, funcSpec.funcId));
+    block ~= Inst(Call(temp, funcSpec.funcId, args));
     return Atom(temp).result;
 }
 
@@ -488,13 +486,13 @@ Result!Type on(BinOp binOp, Type lhsType, Type rhsType, Span lhsSpan, Span rhsSp
     case greaterThan:
     case lessThanOrEqualTo:
     case greaterThanOrEqualTo:
-        auto lhsIsInt = lhsType.contains(Primitive.int_);
-        auto rhsIsInt = rhsType.contains(Primitive.int_);
+        auto lhsIsInt = lhsType.contains(Primitive.i32);
+        auto rhsIsInt = rhsType.contains(Primitive.i32);
         auto lhsIsPointer = lhsType.has!Pointer;
         auto rhsIsPointer = rhsType.has!Pointer;
         if ((lhsIsPointer && rhsIsPointer)
             || (lhsIsInt && rhsIsInt))
-            return result(Type(PrimitiveType.bool_));
+            return result(Type(Primitive.bool_));
         return Err(
             "operation `%s` not permitted on `%s` and `%s`".format(
             binOp.display,
@@ -511,10 +509,10 @@ Result!Type on(BinOp binOp, Type lhsType, Type rhsType, Span lhsSpan, Span rhsSp
     case mul:
     case div:
     case rem:
-        auto lhsIsBool = lhsType.contains(PrimitiveType.bool_);
-        auto rhsIsBool = rhsType.contains(PrimitiveType.bool_);
-        auto lhsIsInt = lhsType.contains(PrimitiveType.int_);
-        auto rhsIsInt = rhsType.contains(PrimitiveType.int_);
+        auto lhsIsBool = lhsType.contains(Primitive.bool_);
+        auto rhsIsBool = rhsType.contains(Primitive.bool_);
+        auto lhsIsInt = lhsType.contains(Primitive.i32);
+        auto rhsIsInt = rhsType.contains(Primitive.i32);
         auto lhsIsPointer = lhsType.has!Pointer;
         auto rhsIsPointer = rhsType.has!Pointer;
         if ((rhsIsPointer && lhsIsInt)
@@ -541,7 +539,7 @@ Result!Type on(UnOp unOp, Type type, Span span, ref Record rec)
     case plus:
     case minus:
     case bitwiseNot:
-        if (!type.contains(PrimitiveType.int_))
+        if (!type.contains(Primitive.i32))
         {
             return Err("expected %s`int`, found %s`%s`"
                        .format(unOp.display,

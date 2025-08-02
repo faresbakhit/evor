@@ -106,7 +106,7 @@ enum AssignMod
 
 enum PrimitiveType
 {
-    int_,
+    i32,
     bool_,
     void_,
 }
@@ -157,7 +157,7 @@ Result!(Type*) parseType(Range)(auto ref Range toks)
     Type* type;
     switch (tok.get!IdentTok.name)
     {
-    case "int": type = new Type(Primitive(tok.span, PrimitiveType.int_)); break;
+    case "i32": type = new Type(Primitive(tok.span, PrimitiveType.i32)); break;
     case "bool": type = new Type(Primitive(tok.span, PrimitiveType.bool_)); break;
     case "void": type = new Type(Primitive(tok.span, PrimitiveType.void_)); break;
     default: return Err("expected type, found %s", tok).result;

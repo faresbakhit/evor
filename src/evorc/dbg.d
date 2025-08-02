@@ -8,12 +8,9 @@ mixin Debug!(
     evorc.ast,
     "FuncDecl", "Pointer", "Primitive", "Param", "Func", "If", "Return",
     "VarDecl", "Assign", "Un", "Bin", "Call", "Ident", "Bool", "Int", "Err",
-    evorc.lin,
-    "LinFunc", "LinIf", "LinAssign", "LinReturn", "LinVar", "LinPointer",
-    "LinUn", "LinBin", "LinCall", "LinBool", "LinInt", "Deref", "Err",
     evorc.tac,
     "Func", "Label", "Jmp", "Jcc", "Bin", "Un", "Assign", "Load", "Store",
-    "Param", "Call", "Return", "Var", "Int", "Bool", "Struct", "Pointer",
+    "Call", "Return", "Var", "I32", "Bool", "Struct", "Pointer",
 );
 
 import evorc.utils.result : Result;
