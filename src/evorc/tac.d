@@ -273,6 +273,26 @@ Result!Unit tac(a.If if_, ref Block block, ref Record rec)
     return unit.result;
 }
 
+Result!Unit tac(a.While while_, ref Block block, ref Record rec)
+{
+    auto condLabel = rec.nextLabel();
+    auto thenLabel = rec.nextLabel();
+    auto endLabel = rec.nextLabel();
+    block ~= Inst(condLabel);
+    auto cond = atom(while_.cond, block, rec)?;
+    if (!cond.type.contains(Primitive.bool_))
+        return Err("expected expression of type `bool`, found `%s`"
+                   .format(cond.type.display(rec)), while_.cond.span)
+               .result;
+    block ~= Inst(Jcc(cond, thenLabel));
+    block ~= Inst(Jmp(endLabel));
+    block ~= Inst(thenLabel);
+    tac(while_.block, block, rec)?;
+    block ~= Inst(Jmp(condLabel));
+    block ~= Inst(endLabel);
+    return unit.result;
+}
+
 Result!Unit tac(a.Return ret, ref Block block, ref Record rec)
 {
     if (ret.expr.isNull)

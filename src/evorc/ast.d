@@ -30,13 +30,15 @@ alias Func = Tuple!(FuncDecl, "decl", Block, "block");
 alias Block = Stmt*[];
 alias Stmt = SumType!(
     Tuple!(Expr*, "cond", This*[], "ifBlock", This*[], "elseBlock"), // If
+    Tuple!(Expr*, "cond", This*[], "block"), // While
     Tuple!(Span, "span", NullableRef!Expr, "expr"), // Return
     VarDecl,
     Assign,
     StmtExpr,
 );
 alias If = Stmt.Types[0];
-alias Return = Stmt.Types[1];
+alias While = Stmt.Types[1];
+alias Return = Stmt.Types[2];
 alias VarDecl = Tuple!(Span, "span", Type*, "type", Ident, "ident", NullableRef!Expr, "def");
 alias Assign = Tuple!(Span, "span", AssignMod, "mod", Expr*, "lhs", Expr*, "rhs");
 alias StmtExpr = NullableRef!Expr;
@@ -220,11 +222,7 @@ Result!(Stmt*) parseStmt(Range)(auto ref Range toks)
     }
     if (toks.nextIf!"if")
     {
-        // auto err = toks.expect!"(";
-        // if (!err.isNull) return err.get.result;
         auto cond = parseExpr(toks)?;
-        // err = toks.expect!")";
-        // if (!err.isNull) return err.get.result;
         Block ifBlock;
         if (toks.nextIs!"{") {
             ifBlock = parseBlock(toks)?;
@@ -244,6 +242,18 @@ Result!(Stmt*) parseStmt(Range)(auto ref Range toks)
             return result(new Stmt(If(cond, ifBlock, elseBlock)));
         }
         return result(new Stmt(If(cond, ifBlock, [])));
+    }
+    if (toks.nextIf!"while")
+    {
+        auto cond = parseExpr(toks)?;
+        Block block;
+        if (toks.nextIs!"{") {
+            block = parseBlock(toks)?;
+        } else {
+            auto stmt = parseStmt(toks)?;
+            block = [stmt];
+        }
+        return result(new Stmt(While(cond, block)));
     }
     if (toks.nextIs!"return")
     {
