@@ -4,13 +4,13 @@ import evorc;
 
 mixin Debug!(
     evorc.tok,
-    "Bool", "Int", "Ident", "Unknown",
+    "Bool", "Int", "Str", "Char", "Ident", "Err",
     evorc.ast,
     "FuncDecl", "Pointer", "Primitive", "Param", "Func", "If", "Return",
     "VarDecl", "Assign", "Un", "Bin", "Call", "Ident", "Bool", "Int", "Err",
     evorc.tac,
     "Func", "Label", "Jmp", "Jcc", "Bin", "Un", "Assign", "Load", "Store",
-    "Call", "Return", "Var", "I32", "Bool", "Struct", "Pointer",
+    "Call", "Return", "Var", "I32", "Bool", "Struct", "Pointer", "Err",
 );
 
 import evorc.utils.result : Result;

@@ -26,6 +26,7 @@ int main(string[] args)
                     },
                     (evorc.tac.Err err)
                     {
+                        stderr.writeln(err.dbg);
                         return 1;
                     }
                 );

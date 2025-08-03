@@ -311,6 +311,11 @@ Result!(Expr*) parseExpr(Range)(auto ref Range toks, ushort min_bp)
             auto rhsBP = unOpBindingPower(op.get);
             auto rhs = parseExpr(toks, rhsBP)?;
             auto span = tok.span.joinSpans(rhs.span);
+            if ((*rhs).has!Int)
+            {
+                (*rhs).get!Int.value = -(*rhs).get!Int.value;
+                return result(rhs);
+            }
             return result(new Expr(Un(span, op.get, rhs)));
         },
         (evorc.tok.Bool bool_) => result(new Expr(Bool(tok.span, bool_.value))),

@@ -430,7 +430,7 @@ Result!Atom atom(a.Call call, ref Block block, ref Record rec)
     auto args = call.args.map!(arg => atom(arg, block, rec)).collect?;
     auto funcSpec = rec.getFuncSpec(call.ident)?;
     if (args.length != funcSpec.paramTypes.length)
-        return Err("function `%s` expects %s argument%s, but %s%s %s given"
+        return Err("function '%s' expects %s argument%s, but %s%s %s given"
                    .format(call.ident.name,
                            funcSpec.paramTypes.length,
                            funcSpec.paramTypes.length == 1 ? "" : "s",
@@ -441,7 +441,7 @@ Result!Atom atom(a.Call call, ref Block block, ref Record rec)
     {
         if (a != b)
         {
-            return Err("function `%s` expects argument %s to be of type `%s`, found `%s`"
+            return Err("function '%s' expects argument %s to be of type `%s`, found `%s`"
                        .format(call.ident.name,
                                index + 1,
                                b.display(rec),

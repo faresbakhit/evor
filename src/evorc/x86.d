@@ -121,7 +121,7 @@ void x86(W)(auto ref W s, ref Stack stack, const ref Record rec, Bin bin)
                 auto var1Mem = stack.addrOf(var1);
                 auto var2Mem = stack.addrOf(var2);
                 auto temp = reg(var1Mem.size, Reg.rax);
-utils.sumtype               s.instr(Instr.mov, temp, var1Mem);
+                s.instr(Instr.mov, temp, var1Mem);
                 s.instr(instr, temp, var2Mem);
                 s.instr(Instr.mov, dest, temp);
             },

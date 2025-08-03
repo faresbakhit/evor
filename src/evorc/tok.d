@@ -95,16 +95,20 @@ Sym sym(string repr)()
 
 alias Bool = Tuple!(bool, "value");
 alias Int = Tuple!(BigInt, "value");
+alias Str = Tuple!(string, "value");
+alias Char = Tuple!(dchar, "value");
 alias Ident = Tuple!(string, "name");
-alias Unknown = Tuple!(dchar, "tok");
+alias Err = Tuple!(string, "message");
 alias Eof = Tuple!();
 
 alias TokType = SumType!(
     Sym,
     Bool,
     Int,
+    Str,
+    Char,
     Ident,
-    Unknown,
+    Err,
     Eof,
 );
 
@@ -195,9 +199,6 @@ private struct Lexer(S) {
     private S src;
     private size_t idx;
     private Tok tok;
-    // Used for disambiguation between signed (+/-) `Int`s
-    // and the binary operators plus and minus.
-    private TokType prevTok = TokType(Eof());
 
     this(string src)
     {
@@ -223,7 +224,6 @@ private struct Lexer(S) {
     void popFront() 
     {
         import std.uni : isWhite;
-        prevTok = tok.type;
         skipWhile!isWhite();
         if (idx >= src.length + 1)
         {
@@ -242,7 +242,6 @@ private struct Lexer(S) {
         // Assumption: All symbolic tokens of multiple codepoints are ASCII
         char ch1 = idx < src.length ? src[idx] : '\0';
         char ch2 = idx + 1 < src.length ? src[idx + 1] : '\0';
-        bool neg = false;
         switch (ch0)
         {
         case '<':
@@ -302,15 +301,6 @@ private struct Lexer(S) {
                 idx++;
                 break;
             default:
-                if (isDigit(ch1) && prevTok.has!Sym)
-                {
-                    neg = true;
-                    ch0 = ch1;
-                    ch1 = ch2;
-                    ch2 = idx + 2 < src.length ? src[idx + 2] : '\0';
-                    ++idx;
-                    goto intTok;
-                }
                 symbol = Sym.minus;
             }
             goto ret;
@@ -377,14 +367,6 @@ private struct Lexer(S) {
             idx += (ch1 == '=');
             goto ret;
         case '+':
-            if (isDigit(ch1) && prevTok.has!Sym)
-            {
-                ch0 = ch1;
-                ch1 = ch2;
-                ch2 = idx + 2 < src.length ? src[idx + 2] : '\0';
-                ++idx;
-                goto intTok;
-            }
             symbol = (ch1 == '=') ? Sym.plusEqual : Sym.plus;
             idx += (ch1 == '=');
             goto ret;
@@ -514,7 +496,6 @@ private struct Lexer(S) {
                 v += c - '0';
                 ++idx;
             } while (idx < src.length);
-            if (neg) v = -v;
             tok = Tok(src[start..idx], TokType(Int(v)));
             return;
         }
@@ -537,7 +518,141 @@ private struct Lexer(S) {
             }
             return;
         }
-        tok = Tok(src[start..idx], TokType(Unknown(ch0)));
+        if (ch0 == '"')
+        {
+            string s;
+            while (idx < src.length)
+            {
+                size_t escapeStart = idx;
+                dchar ch = decode(src, idx);
+                switch (ch)
+                {
+                case '"':
+                    tok = Tok(src[start..idx], TokType(Str(s)));
+                    return;
+                case '\\':
+                    if (idx >= src.length) goto errTermStr;
+                    ch = decode(src, idx);
+                    ch = escapeCharacter(ch);
+                    if (ch == dchar.max) return;
+                    goto default;
+                default:
+                    s ~= ch;
+                }
+            }
+        errTermStr:
+            tok = Tok(src[start..idx], TokType(Err("unterminated string literal")));
+            return;
+        }
+        if (ch0 == '\'')
+        {
+            dchar ch = decode(src, idx);
+            switch (ch)
+            {
+            case '\'':
+                tok = Tok(src[start..idx], TokType(Err("empty character literal")));
+                return;
+            case '\\':
+                if (idx >= src.length) goto errTermChar;
+                ch = decode(src, idx);
+                ch = escapeCharacter(ch);
+                if (ch == dchar.max) return;
+                break;
+            default:
+                break;
+            }
+            if (idx < src.length && src[idx] == '\'')
+            {
+                tok = Tok(src[start..++idx], TokType(Char(ch)));
+                return;
+            }
+        errTermChar:
+            tok = Tok(src[start..idx], TokType(Err("unterminated character literal")));
+            return;
+        }
+        tok = Tok(src[start..idx], TokType(Err("unknown token")));
+    }
+
+    private dchar escapeCharacter(dchar ch)
+    {
+        size_t start = idx - 2;
+        switch (ch)
+        {
+        case '\'': return '\'';
+        case '"':  return '"';
+        case 'n':  return '\n';
+        case 'r':  return '\r';
+        case 't':  return '\t';
+        case '\\': return '\\';
+        case '0':  return '\0';
+        case 'u':
+            if (idx >= src.length || src[idx++] != '{')
+            {
+                tok = Tok(src[start..idx], TokType(Err("unicode escape must start with '{'")));
+                return dchar.max;
+            }
+            if (idx >= src.length)
+            {
+            errTermUni:
+                tok = Tok(src[start..idx], TokType(Err("unterminated unicode escape")));
+                return dchar.max;
+            }
+            if (src[idx] == '}')
+            {
+                tok = Tok(src[start..++idx], TokType(Err("empty unicode escape sequence")));
+                return dchar.max;
+            }
+            uint val;
+            do
+            {
+                uint c = src[idx];
+                if (c == '_')
+                {
+                    ++idx;
+                    continue;
+                }
+                if (c < '0')
+                    break;
+                if (c > '9')
+                {
+                    c |= 0x20;//poorman's tolower
+                    if (c < 'a' || c > 'f')
+                        break;
+                    c -= 'a'-10-'0';
+                }
+                val *= 16;
+                val += c - '0';
+                ++idx;
+                if (val > 0x10FFFF)
+                {
+                    while (idx < src.length)
+                    {
+                        c = src[idx];
+                        if (!(isHexDigit(c) || c == '_' || c == '}')) break;
+                        idx++;
+                    }
+                    tok = Tok(src[start..idx], TokType(Err("unicode escape must be at most 10FFFF")));
+                    return dchar.max;
+                }
+            } while (idx < src.length);
+            if (idx >= src.length) goto errTermUni;
+            uint c = src[idx++];
+            if (!(isHexDigit(c) || c == '_' || c == '}'))
+            {
+                tok = Tok(src[idx-1..idx], TokType(Err("invalid character in unicode escape")));
+                return dchar.max;
+            }
+            auto cha = cast(dchar)val;
+            if (!isValidDchar(cha))
+            {
+                tok = Tok(src[start..idx], TokType(Err("invalid unicode character")));
+                return dchar.max;
+            }
+            return cha;
+        default:
+            tok = Tok(src[start..idx], TokType(Err("unknown character escape")));
+            return dchar.max;
+        }
     }
 
     private void skipWhile(alias pred)()
