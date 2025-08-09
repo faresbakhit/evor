@@ -1,6 +1,9 @@
-build/
-docs/
-*.o
-/dpp
-/evorc
-/evorc-unittest
+/target
+
+# trial 1
+/trial1-d/build/
+/trial1-d/docs/
+/trial1-d/*.o
+/trial1-d/dpp
+/trial1-d/evorc
+/trial1-d/evorc-unittest
