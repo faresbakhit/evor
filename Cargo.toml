@@ -1,0 +1,11 @@
+[package]
+name = "evorc"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+doctest = false
+
+[dependencies]
+codespan-reporting = "0.12.0"
+unicode-ident = "1.0.18"
