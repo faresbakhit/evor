@@ -1,8 +1,8 @@
-use crate::ast::*;
 use crate::interner::Interner;
 use crate::lexer::Lexer;
 use crate::pool::Pool;
 use crate::span::Span;
+use crate::syn::*;
 use crate::token::Keyword::*;
 use crate::token::Symbol::*;
 use crate::token::TokenKind::*;
@@ -296,7 +296,7 @@ impl<'a> Parser<'a> {
                         self.tokens.next_if(Sym(Comma));
                         end = self.tokens.peek().span.end();
                     }
-                    let args = self.exprs.extend(args);
+                    let args = self.exprs.insert_many(args);
                     Expr {
                         kind: ExprKind::Call { func: id, args },
                         span: Span::new(token.span.start(), end),

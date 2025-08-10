@@ -1,7 +1,7 @@
 use std::num::NonZero;
 
 /// A trait for representing compact, copyable handles (IDs) for
-/// recursive/[Pool](crate::pool::Pool)-allocated types or any other [`Handle`]/index-based
+/// recursive/[Pool](crate::pool::Pool)-allocated types or any other index-based
 /// data structure (e.g., [Interner](crate::interner::Interner), [SymbolTable](crate::symbol_table::SymbolTable)).
 ///
 /// Inspired by:
@@ -65,12 +65,12 @@ macro_rules! impl_handle {
 
                 #[inline(always)]
                 fn from_usize(n: usize) -> $name {
-                    $name(<$type as $crate::handle::Handle>::from_usize(n))
+                    $name($crate::handle::Handle::from_usize(n))
                 }
 
                 #[inline(always)]
                 fn to_usize(self) -> usize {
-                    self.0.to_usize()
+                    $crate::handle::Handle::to_usize(self.0)
                 }
             }
         )*

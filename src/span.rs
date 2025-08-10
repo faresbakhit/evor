@@ -16,7 +16,7 @@ pub struct Span<H: Handle = ByteIdx> {
 
 impl<H: Handle> fmt::Debug for Span<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}({:?}..{:?})", H::NAME, self.start(), self.end())
+        write!(f, "Span<{}>({:?}..{:?})", H::NAME, self.start(), self.end())
     }
 }
 

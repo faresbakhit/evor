@@ -25,7 +25,7 @@ impl<T, H: Handle> Pool<T, H> {
         handle
     }
 
-    pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) -> Span<H> {
+    pub fn insert_many<I: IntoIterator<Item = T>>(&mut self, iter: I) -> Span<H> {
         let start = self.vec.len();
         self.vec.extend(iter);
         Span::new(start, self.vec.len())
