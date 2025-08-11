@@ -1,4 +1,7 @@
+use std::fmt;
+
 use crate::interner::Interner;
+use crate::interner::StringInterner;
 use crate::lexer::Lexer;
 use crate::pool::Pool;
 use crate::span::Span;
@@ -11,8 +14,8 @@ use crate::token::*;
 #[derive(Debug)]
 pub struct Parser<'a> {
     tokens: Lexer<'a>,
-    types: Interner<Ty, TyId>,
-    exprs: Pool<Expr, ExprId>,
+    pub types: Interner<Ty, TyId>,
+    pub exprs: Pool<Expr, ExprId>,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -40,13 +43,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Program> {
-        let mut prog = Program::new();
+    pub fn parse(&mut self) -> Result<Syn> {
+        let mut syn = Syn::new();
         loop {
             let token = self.tokens.peek();
             let item = match token.kind {
                 Kw(Struct) => {
-                    use crate::ast::Struct;
+                    use crate::syn::Struct;
                     let start = token.span.start();
                     self.tokens.next();
                     let ident = self.parse_ident()?;
@@ -60,7 +63,7 @@ impl<'a> Parser<'a> {
                         span,
                     })
                 }
-                Eof => break Ok(prog),
+                Eof => break Ok(syn),
                 _ => {
                     let (ret_ty, ret_ty_span) = match self.parse_type() {
                         Ok(r) => r,
@@ -76,20 +79,20 @@ impl<'a> Parser<'a> {
                     let token = self.tokens.next();
                     match token.kind {
                         Sym(OpenBrace) => {
-                            let mut stmts = Vec::new();
+                            let mut block = Vec::new();
                             while self.tokens.peek().kind != Sym(CloseBrace) {
-                                stmts.push(self.parse_stmt()?);
+                                block.push(self.parse_stmt()?);
                             }
                             let end = self.tokens.next().span.end();
                             let span = Span::new(start, end);
-                            let decl = Func {
+                            let decl = FuncDecl {
                                 ident,
                                 params,
                                 ret_ty,
-                                stmts,
                                 span,
                             };
-                            Item::Func(decl)
+                            let func = Func { decl, block, span };
+                            Item::Func(func)
                         }
                         Sym(Semicolon) => {
                             let span = Span::new(start, token.span.end());
@@ -105,34 +108,30 @@ impl<'a> Parser<'a> {
                     }
                 }
             };
-            prog.push(item);
+            syn.push(item);
         }
     }
 
-    pub fn expr(&self, id: ExprId) -> &Expr {
-        self.exprs.get(id)
+    pub fn idents(&self) -> &StringInterner<IdentId> {
+        self.tokens.idents()
     }
 
-    pub fn ty(&self, id: TyId) -> &Ty {
-        self.types.resolve(id)
-    }
-
-    pub fn ident(&self, id: IdentId) -> &str {
-        self.tokens.ident(id)
-    }
-
-    pub fn str(&self, span: Span) -> std::result::Result<String, BadTokenKind> {
-        self.tokens.str(span)
+    pub fn ty_display(&self, id: TyId) -> TyDisplay {
+        TyDisplay {
+            id,
+            types: &self.types,
+            idents: self.idents(),
+        }
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>> {
         self.expect(OpenBrace)?;
-        let mut stmts = Vec::new();
+        let mut block = Vec::new();
         while self.tokens.peek().kind != Sym(CloseBrace) {
-            stmts.push(self.parse_stmt()?);
+            block.push(self.parse_stmt()?);
         }
         self.tokens.next();
-        Ok(stmts)
+        Ok(block)
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt> {
@@ -150,16 +149,22 @@ impl<'a> Parser<'a> {
                             Sym(Equal) => {
                                 let expr = self.parse_expr()?;
                                 self.expect(Semicolon)?;
-                                Stmt::VarDecl {
-                                    ident,
-                                    ty: Some(ty),
-                                    init: Some(expr),
+                                Stmt {
+                                    kind: StmtKind::VarDecl {
+                                        ident,
+                                        ty: Some(ty),
+                                        init: Some(expr),
+                                    },
+                                    span: Span::dumb(),
                                 }
                             }
-                            Sym(Semicolon) => Stmt::VarDecl {
-                                ident,
-                                ty: Some(ty),
-                                init: None,
+                            Sym(Semicolon) => Stmt {
+                                kind: StmtKind::VarDecl {
+                                    ident,
+                                    ty: Some(ty),
+                                    init: None,
+                                },
+                                span: Span::dumb(),
                             },
                             _ => return expected!("`=` or `;`", found: token),
                         }
@@ -167,16 +172,22 @@ impl<'a> Parser<'a> {
                     Sym(Equal) => {
                         let expr = self.parse_expr()?;
                         self.expect(Semicolon)?;
-                        Stmt::VarDecl {
-                            ident,
-                            ty: None,
-                            init: Some(expr),
+                        Stmt {
+                            kind: StmtKind::VarDecl {
+                                ident,
+                                ty: None,
+                                init: Some(expr),
+                            },
+                            span: Span::dumb(),
                         }
                     }
-                    Sym(Semicolon) => Stmt::VarDecl {
-                        ident,
-                        ty: None,
-                        init: None,
+                    Sym(Semicolon) => Stmt {
+                        kind: StmtKind::VarDecl {
+                            ident,
+                            ty: None,
+                            init: None,
+                        },
+                        span: Span::dumb(),
                     },
                     _ => return expected!("one of `:`, `=`, or `;`", found: token),
                 };
@@ -184,56 +195,77 @@ impl<'a> Parser<'a> {
             }
             Kw(If) => {
                 self.tokens.next();
-                Stmt::If {
-                    cond: self.parse_expr()?,
-                    then: self.parse_block()?,
-                    otherwise: if self.tokens.peek().kind == Kw(Else) {
-                        self.tokens.next();
-                        self.parse_block()?
-                    } else {
-                        Vec::new()
+                Stmt {
+                    kind: StmtKind::If {
+                        cond: self.parse_expr()?,
+                        then: self.parse_block()?,
+                        otherwise: if self.tokens.peek().kind == Kw(Else) {
+                            self.tokens.next();
+                            self.parse_block()?
+                        } else {
+                            Vec::new()
+                        },
                     },
+                    span: Span::dumb(),
                 }
             }
             Kw(While) => {
                 self.tokens.next();
-                Stmt::While {
-                    cond: self.parse_expr()?,
-                    stmts: self.parse_block()?,
+                Stmt {
+                    kind: StmtKind::While {
+                        cond: self.parse_expr()?,
+                        block: self.parse_block()?,
+                    },
+                    span: Span::dumb(),
                 }
             }
             Kw(Return) => {
                 self.tokens.next();
-                Stmt::Return {
-                    expr: if self.tokens.peek().kind == Sym(Semicolon) {
-                        self.tokens.next();
-                        None
-                    } else {
-                        let expr = self.parse_expr()?;
-                        self.expect(Semicolon)?;
-                        Some(expr)
+                Stmt {
+                    kind: StmtKind::Return {
+                        expr: if self.tokens.peek().kind == Sym(Semicolon) {
+                            self.tokens.next();
+                            None
+                        } else {
+                            let expr = self.parse_expr()?;
+                            self.expect(Semicolon)?;
+                            Some(expr)
+                        },
                     },
+                    span: Span::dumb(),
                 }
             }
             Kw(Break) => {
                 self.tokens.next();
                 self.expect(Semicolon)?;
-                Stmt::Break
+                Stmt {
+                    kind: StmtKind::Break,
+                    span: Span::dumb(),
+                }
             }
             Kw(Continue) => {
                 self.tokens.next();
                 self.expect(Semicolon)?;
-                Stmt::Break
+                Stmt {
+                    kind: StmtKind::Break,
+                    span: Span::dumb(),
+                }
             }
             _ => {
                 let lhs = self.parse_expr()?;
                 let token = self.tokens.next();
                 match token.kind {
-                    Sym(Semicolon) => Stmt::Expr { id: lhs },
+                    Sym(Semicolon) => Stmt {
+                        kind: StmtKind::Expr { id: lhs },
+                        span: Span::dumb(),
+                    },
                     Sym(Equal) => {
                         let rhs = self.parse_expr()?;
                         self.expect(Semicolon)?;
-                        Stmt::Assign { lhs, rhs }
+                        Stmt {
+                            kind: StmtKind::Assign { lhs, rhs },
+                            span: Span::dumb(),
+                        }
                     }
                     _ => return expected!("`;` or `=`", found: token),
                 }
@@ -401,6 +433,36 @@ impl<'a> Parser<'a> {
             Ok(token.span)
         } else {
             expected!(sym, found: token)
+        }
+    }
+}
+
+pub struct TyDisplay<'p> {
+    id: TyId,
+    types: &'p Interner<Ty, TyId>,
+    idents: &'p StringInterner<IdentId>,
+}
+
+impl<'p> fmt::Display for TyDisplay<'p> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ty = self.types.resolve(self.id);
+        match ty {
+            Ty::Void => f.write_str("void"),
+            Ty::Bool => f.write_str("bool"),
+            Ty::I32 => f.write_str("i32"),
+            Ty::Pointer(pointee_id) => write!(
+                f,
+                "{}*",
+                TyDisplay {
+                    id: *pointee_id,
+                    types: self.types,
+                    idents: self.idents
+                }
+            ),
+            Ty::Struct(ident_id) => {
+                f.write_str("struct ")?;
+                f.write_str(self.idents.resolve(*ident_id))
+            }
         }
     }
 }

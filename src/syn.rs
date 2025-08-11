@@ -3,7 +3,7 @@ use crate::span::Span;
 use crate::token::IdentId;
 use crate::token::Symbol;
 
-pub type Program = Vec<Item>;
+pub type Syn = Vec<Item>;
 
 #[derive(Clone, Debug, Hash)]
 pub enum Item {
@@ -21,10 +21,8 @@ pub struct Struct {
 
 #[derive(Clone, Debug, Hash)]
 pub struct Func {
-    pub ident: IdentId,
-    pub params: Vec<VarDecl>,
-    pub ret_ty: TyId,
-    pub stmts: Vec<Stmt>,
+    pub decl: FuncDecl,
+    pub block: Vec<Stmt>,
     pub span: Span,
 }
 
@@ -44,7 +42,13 @@ pub struct VarDecl {
 }
 
 #[derive(Clone, Debug, Hash)]
-pub enum Stmt {
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, Hash)]
+pub enum StmtKind {
     VarDecl {
         ident: IdentId,
         ty: Option<TyId>,
@@ -64,7 +68,7 @@ pub enum Stmt {
     },
     While {
         cond: ExprId,
-        stmts: Vec<Stmt>,
+        block: Vec<Stmt>,
     },
     Break,
     Continue,
@@ -73,13 +77,13 @@ pub enum Stmt {
     },
 }
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Copy, Clone, Debug, Hash)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
 }
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Copy, Clone, Debug, Hash)]
 pub enum ExprKind {
     Un { op: UnOp, expr: ExprId },
     Bin { op: BinOp, lhs: ExprId, rhs: ExprId },

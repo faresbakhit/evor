@@ -2,6 +2,7 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+use evorc::analyzer::Analyzer;
 use evorc::lexer::Lexer;
 use evorc::parser::Parser;
 use std::env;
@@ -22,24 +23,34 @@ fn main() -> ExitCode {
         "<stdin>"
     };
     let mut parser = Parser::new(Lexer::new(&input));
-    match parser.parse() {
+    match match parser.parse() {
         Ok(prog) => {
-            println!("{prog:#?}");
-            ExitCode::SUCCESS
+            // println!("{prog:#?}");
+            let mut analyzer = Analyzer::new(parser);
+            match analyzer.analyze(prog) {
+                Ok(prog) => {
+                    println!("{prog:#?}");
+                    Ok(())
+                }
+                Err(err) => Err((err.span, "bad semantics", err.message)),
+            }
         }
-        Err(err) => {
+        Err(err) => Err((
+            err.span,
+            "bad syntax",
+            format!("expected {}, found {}", err.expected, err.found),
+        )),
+    } {
+        Ok(()) => ExitCode::SUCCESS,
+        Err((span, category, message)) => {
             let mut files = SimpleFiles::new();
-            let span = err.span.as_range();
+            let span = span.as_range();
             let file_id = files.add(filename, input);
-            let message = format!("expected {}, found {}", err.expected, err.found);
-
             let diagnostic = Diagnostic::error()
-                .with_message("bad syntax")
+                .with_message(category)
                 .with_label(Label::primary(file_id, span).with_message(message));
-
             let writer = StandardStream::stderr(ColorChoice::Always);
             let config = term::Config::default();
-
             term::emit(&mut writer.lock(), &config, &files, &diagnostic).unwrap();
             ExitCode::FAILURE
         }

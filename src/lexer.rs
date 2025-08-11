@@ -14,23 +14,23 @@ pub struct Lexer<'a> {
     chars: Chars<'a>,
     rem: usize,
     pos: usize,
-    interner: StringInterner<IdentId>,
     peeked: Option<Token>,
+    idents: StringInterner<IdentId>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
-        let mut interner = StringInterner::with_capacity(1024);
+        let mut idents = StringInterner::with_capacity(1024);
         for kw in Keyword::VALUES {
-            interner.intern(kw.as_str());
+            idents.intern(kw.as_str());
         }
         Self {
             src,
             chars: src.chars(),
             rem: src.len(),
             pos: 0,
-            interner,
             peeked: None,
+            idents,
         }
     }
 
@@ -222,7 +222,7 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.bump_while(is_ident_continue);
                 let ident = &s[..self.bumped()];
-                let ident_id = self.interner.intern(ident);
+                let ident_id = self.idents.intern(ident);
                 if ident_id.to_usize() < Keyword::COUNT {
                     // SAFETY: See `new`
                     let keyword = ident_id.to_usize() as u8;
@@ -285,8 +285,8 @@ impl<'a> Lexer<'a> {
         Token::new(kind, self.bumped_span())
     }
 
-    pub fn ident(&self, ident_id: IdentId) -> &str {
-        self.interner.resolve(ident_id)
+    pub fn idents(&self) -> &StringInterner<IdentId> {
+        &self.idents
     }
 
     pub fn str(&self, span: Span) -> Result<String, BadTokenKind> {

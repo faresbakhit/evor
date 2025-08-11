@@ -29,6 +29,10 @@ impl<H: Handle> Span<H> {
         }
     }
 
+    pub fn dumb() -> Span<H> {
+        Span::new(0, 0)
+    }
+
     #[inline(always)]
     pub fn start(&self) -> usize {
         self.start.to_usize()
