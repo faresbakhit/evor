@@ -11,3 +11,4 @@ pub mod span;
 pub mod symbol_table;
 pub mod syn;
 pub mod token;
+pub mod ty;

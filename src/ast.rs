@@ -16,7 +16,13 @@ pub struct Func {
 }
 
 #[derive(Clone, Debug, Hash)]
-pub enum Stmt {
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, Hash)]
+pub enum StmtKind {
     Assign {
         lhs: ExprId,
         rhs: ExprId,

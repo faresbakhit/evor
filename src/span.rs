@@ -1,6 +1,6 @@
 use crate::handle::{impl_handle, Handle};
-use std::fmt;
-use std::ops::{Index, IndexMut, Range};
+use std::ops::{Add, Bound, Index, IndexMut, Range, RangeBounds};
+use std::{fmt, mem};
 
 impl_handle! {
     /// A byte offset.
@@ -100,4 +100,27 @@ impl_index! {
     impl<U> for [U] => [U];
     impl for str => str;
     impl for String => str;
+}
+
+impl<H: Handle> RangeBounds<H> for Span<H> {
+    fn start_bound(&self) -> Bound<&H> {
+        Bound::Included(&self.start)
+    }
+
+    fn end_bound(&self) -> Bound<&H> {
+        Bound::Excluded(&self.end)
+    }
+}
+
+impl<H: Handle> Iterator for Span<H> {
+    type Item = H;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start < self.end {
+            let n = self.start.to_usize() + 1;
+            Some(mem::replace(&mut self.start, Handle::from_usize(n)))
+        } else {
+            None
+        }
+    }
 }

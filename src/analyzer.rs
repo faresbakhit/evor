@@ -2,26 +2,25 @@ use std::{any::Any, collections::HashMap};
 
 use crate::{
     ast::{self, BinOp, Expr, Ty, TyId, UnOp, VarId},
+    handle::Handle,
+    interner::StringInterner,
     parser::Parser,
     pool::Pool,
     span::Span,
     symbol_table::SymbolTable,
     syn::{self, FuncDecl},
     token::IdentId,
+    ty::Types,
 };
 
-#[derive(Copy, Clone, Hash, Debug)]
-struct Var {
-    id: VarId,
-    ty: TyId,
-}
-
-pub struct Analyzer<'a> {
-    parser: Parser<'a>,
-    exprs: Pool<ast::Expr, ast::ExprId>,
+#[derive(Debug)]
+pub struct Analyzer {
+    idents: StringInterner<IdentId>,
+    syn_expr_pool: Pool<syn::Expr, syn::ExprId>,
+    expr_pool: Pool<ast::Expr, ast::ExprId>,
     funcs: HashMap<IdentId, FuncDecl>,
-    var_table: SymbolTable<IdentId, VarId>,
-    vars: HashMap<VarId, Var>,
+    types: Types,
+    vars: Vars,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -35,14 +34,19 @@ macro_rules! err {
     };
 }
 
-impl<'a> Analyzer<'a> {
-    pub fn new(parser: Parser<'a>) -> Self {
+impl Analyzer {
+    pub fn new(
+        idents: StringInterner<IdentId>,
+        syn_expr_pool: Pool<syn::Expr, syn::ExprId>,
+        types: Types,
+    ) -> Self {
         Self {
-            parser,
+            idents,
+            syn_expr_pool,
+            expr_pool: Pool::new(),
             funcs: HashMap::new(),
-            exprs: Pool::new(),
-            var_table: SymbolTable::new(),
-            vars: HashMap::new(),
+            types,
+            vars: Vars::new(),
         }
     }
 
@@ -60,168 +64,322 @@ impl<'a> Analyzer<'a> {
         }
         prog.into_iter()
             .filter_map(|item| {
-                self.var_table.enter_scope();
-                let r = if let syn::Item::Func(func) = item {
-                    Some(Ok(ast::Func {
+                if let syn::Item::Func(func) = item {
+                    self.vars.enter_scope();
+                    for param in func.decl.params.iter() {
+                        match param.ident {
+                            Some(ident) => {
+                                self.vars.insert(ident, param.ty);
+                            }
+                            None => (),
+                        }
+                    }
+                    let func = ast::Func {
                         ident: func.decl.ident,
                         params: func.decl.params,
                         ret_ty: func.decl.ret_ty,
-                        block: match self.analyze_block(func.block) {
+                        block: match func
+                            .block
+                            .into_iter()
+                            .map(|stmt| self.analyze_stmt(stmt, InLoop::No, func.decl.ret_ty))
+                            .collect()
+                        {
                             Ok(block) => block,
                             Err(err) => return Some(Err(err)),
                         },
                         span: func.span,
-                    }))
+                    };
+                    self.vars.exit_scope();
+                    Some(Ok(func))
                 } else {
                     None
-                };
-                self.var_table.exit_scope();
-                r
+                }
             })
             .collect()
     }
 
-    fn analyze_block(&mut self, block: Vec<syn::Stmt>) -> Result<Vec<ast::Stmt>> {
-        block
+    fn analyze_block(
+        &mut self,
+        block: Vec<syn::Stmt>,
+        in_loop: InLoop,
+        returnable: TyId,
+    ) -> Result<Vec<ast::Stmt>> {
+        self.vars.enter_scope();
+        let block = block
             .into_iter()
-            .map(|stmt| self.analyze_stmt(stmt))
-            .collect()
+            .map(|stmt| self.analyze_stmt(stmt, in_loop, returnable))
+            .collect();
+        self.vars.exit_scope();
+        block
     }
 
-    fn analyze_stmt(&mut self, stmt: syn::Stmt) -> Result<ast::Stmt> {
-        let stmt = match stmt.kind {
-            syn::StmtKind::VarDecl { ident, ty, init } => {
-                let id = self.var_table.insert(ident);
-                match (ty, init) {
-                    (Some(ty), Some(expr)) => {
-                        let expr = self.analyze_expr(expr)?;
-                        if ty != expr.ty {
-                            return err!(at: expr.span, "expected `{}`, found `{}`", self.parser.ty_display(ty), self.parser.ty_display(expr.ty));
-                        }
-                        ast::Stmt::Assign {
-                            lhs: self.exprs.insert(Expr {
+    fn analyze_stmt(
+        &mut self,
+        stmt: syn::Stmt,
+        in_loop: InLoop,
+        returnable: TyId,
+    ) -> Result<ast::Stmt> {
+        let span = stmt.span;
+        let kind = match stmt.kind {
+            syn::StmtKind::VarDecl { ident, ty, init } => match (ty, init) {
+                (Some(ty), Some(expr)) => {
+                    if (ty == Types::VOID) {
+                        return err!(at: span, "can't declare variable with type `void`");
+                    }
+                    let expr = self.analyze_expr(expr)?;
+                    if ty != expr.ty {
+                        return err!(at: expr.span, "expected `{}`, found `{}`", self.types.display(ty), self.types.display(expr.ty));
+                    }
+                    let id = self.vars.insert(ident, expr.ty);
+                    ast::StmtKind::Assign {
+                        lhs: self.expr_pool.insert(Expr {
+                            kind: ast::ExprKind::Var { id },
+                            ty,
+                            span: Span::dumb(),
+                        }),
+                        rhs: self.expr_pool.insert(expr),
+                    }
+                }
+                (None, Some(expr)) => {
+                    let expr = self.analyze_expr(expr)?;
+                    let id = self.vars.insert(ident, expr.ty);
+                    ast::StmtKind::Assign {
+                        lhs: self.expr_pool.insert(Expr {
+                            kind: ast::ExprKind::Var { id },
+                            ty: expr.ty,
+                            span: Span::dumb(),
+                        }),
+                        rhs: self.expr_pool.insert(expr),
+                    }
+                }
+                (Some(ty), None) => match self.types.get(ty) {
+                    Ty::Void => return err!(at: span, "can't declare variable with type `void`"),
+                    Ty::Bool => {
+                        let id = self.vars.insert(ident, ty);
+                        ast::StmtKind::Assign {
+                            lhs: self.expr_pool.insert(Expr {
                                 kind: ast::ExprKind::Var { id },
                                 ty,
                                 span: Span::dumb(),
                             }),
-                            rhs: self.exprs.insert(expr),
-                        }
-                    }
-                    (None, Some(expr)) => {
-                        let expr = self.analyze_expr(expr)?;
-                        self.vars.insert(id, Var { id, ty: expr.ty });
-                        ast::Stmt::Assign {
-                            lhs: self.exprs.insert(Expr {
-                                kind: ast::ExprKind::Var { id },
-                                ty: expr.ty,
+                            rhs: self.expr_pool.insert(ast::Expr {
+                                kind: ast::ExprKind::Bool { val: false },
+                                ty,
                                 span: Span::dumb(),
                             }),
-                            rhs: self.exprs.insert(expr),
                         }
                     }
-                    (Some(ty), None) => match self.parser.types.resolve(ty) {
-                        Ty::Void => {
-                            return err!(at: Span::dumb(), "variable declared with type `void`")
+                    Ty::I32 => {
+                        let id = self.vars.insert(ident, ty);
+                        ast::StmtKind::Assign {
+                            lhs: self.expr_pool.insert(Expr {
+                                kind: ast::ExprKind::Var { id },
+                                ty,
+                                span: Span::dumb(),
+                            }),
+                            rhs: self.expr_pool.insert(ast::Expr {
+                                kind: ast::ExprKind::Int { val: 0 },
+                                ty,
+                                span: Span::dumb(),
+                            }),
                         }
-                        Ty::Bool => {
-                            self.vars.insert(id, Var { id, ty });
-                            ast::Stmt::Assign {
-                                lhs: self.exprs.insert(Expr {
-                                    kind: ast::ExprKind::Var { id },
-                                    ty,
-                                    span: Span::dumb(),
-                                }),
-                                rhs: self.exprs.insert(ast::Expr {
-                                    kind: ast::ExprKind::Bool { val: false },
-                                    ty,
-                                    span: Span::dumb(),
-                                }),
-                            }
-                        }
-                        Ty::I32 => {
-                            self.vars.insert(id, Var { id, ty });
-                            ast::Stmt::Assign {
-                                lhs: self.exprs.insert(Expr {
-                                    kind: ast::ExprKind::Var { id },
-                                    ty,
-                                    span: Span::dumb(),
-                                }),
-                                rhs: self.exprs.insert(ast::Expr {
-                                    kind: ast::ExprKind::Int { val: 0 },
-                                    ty,
-                                    span: Span::dumb(),
-                                }),
-                            }
-                        }
-                        Ty::Pointer(ty_id) => {
-                            self.vars.insert(id, Var { id, ty });
-                            ast::Stmt::Assign {
-                                lhs: self.exprs.insert(Expr {
-                                    kind: ast::ExprKind::Var { id },
-                                    ty,
-                                    span: Span::dumb(),
-                                }),
-                                rhs: self.exprs.insert(ast::Expr {
-                                    kind: ast::ExprKind::Int { val: 0 },
-                                    ty,
-                                    span: Span::dumb(),
-                                }),
-                            }
-                        }
-                        Ty::Struct(ident_id) => todo!("structs"),
-                    },
-                    (None, None) => {
-                        return err!(at: stmt.span, "variable declaration without type or initializer")
                     }
+                    Ty::Pointer(ty_id) => {
+                        let id = self.vars.insert(ident, ty);
+                        ast::StmtKind::Assign {
+                            lhs: self.expr_pool.insert(Expr {
+                                kind: ast::ExprKind::Var { id },
+                                ty,
+                                span: Span::dumb(),
+                            }),
+                            rhs: self.expr_pool.insert(ast::Expr {
+                                kind: ast::ExprKind::Int { val: 0 },
+                                ty,
+                                span: Span::dumb(),
+                            }),
+                        }
+                    }
+                },
+                (None, None) => return err!(at: span, "can't declare variable with no type"),
+            },
+            syn::StmtKind::Assign { lhs, rhs } => {
+                let lhs = self.analyze_expr(lhs)?;
+                let rhs = self.analyze_expr(rhs)?;
+                if (lhs.ty != rhs.ty) {
+                    return err!(at: rhs.span, "expected `{}`, found `{}`", self.types.display(lhs.ty), self.types.display(rhs.ty));
+                }
+                ast::StmtKind::Assign {
+                    lhs: self.expr_pool.insert(lhs),
+                    rhs: self.expr_pool.insert(rhs),
                 }
             }
-            syn::StmtKind::Assign { lhs, rhs } => todo!(),
             syn::StmtKind::Expr { id } => {
                 let expr = self.analyze_expr(id)?;
-                let id = self.exprs.insert(expr);
-                ast::Stmt::Expr { id }
+                let id = self.expr_pool.insert(expr);
+                ast::StmtKind::Expr { id }
             }
             syn::StmtKind::If {
                 cond,
                 then,
                 otherwise,
-            } => todo!(),
-            syn::StmtKind::While { cond, block } => todo!(),
-            syn::StmtKind::Break => todo!(),
-            syn::StmtKind::Continue => todo!(),
-            syn::StmtKind::Return { expr } => todo!(),
+            } => {
+                let cond = self.analyze_expr(cond)?;
+                if cond.ty != Types::BOOL {
+                    return err!(at: cond.span, "expected `bool`, found `{}`", self.types.display(cond.ty));
+                }
+                ast::StmtKind::If {
+                    cond: self.expr_pool.insert(cond),
+                    then: self.analyze_block(then, in_loop, returnable)?,
+                    otherwise: self.analyze_block(otherwise, in_loop, returnable)?,
+                }
+            }
+            syn::StmtKind::While { cond, block } => {
+                let cond = self.analyze_expr(cond)?;
+                if cond.ty != Types::BOOL {
+                    return err!(at: cond.span, "expected `bool`, found `{}`", self.types.display(cond.ty));
+                }
+                ast::StmtKind::While {
+                    cond: self.expr_pool.insert(cond),
+                    block: self.analyze_block(block, InLoop::Yes, returnable)?,
+                }
+            }
+            syn::StmtKind::Break => {
+                if in_loop == InLoop::No {
+                    return err!(at: span, "can't `break` outside of loop");
+                }
+                ast::StmtKind::Break
+            }
+            syn::StmtKind::Continue => {
+                if in_loop == InLoop::No {
+                    return err!(at: span, "can't `continue` outside of loop");
+                }
+                ast::StmtKind::Continue
+            }
+            syn::StmtKind::Return { expr } => {
+                let expr = match expr {
+                    Some(expr) => {
+                        let expr = self.analyze_expr(expr)?;
+                        if expr.ty != returnable {
+                            return err!(at: expr.span, "expected `{}`, found `{}`", self.types.display(returnable), self.types.display(expr.ty));
+                        }
+                        Some(self.expr_pool.insert(expr))
+                    }
+                    None => {
+                        if returnable != Types::VOID {
+                            return err!(at: stmt.span, "expected `{}`, found `void`", self.types.display(returnable));
+                        }
+                        None
+                    }
+                };
+                ast::StmtKind::Return { expr }
+            }
         };
-        Ok(stmt)
+        Ok(ast::Stmt { kind, span })
     }
 
     fn analyze_expr(&mut self, id: syn::ExprId) -> Result<ast::Expr> {
-        let expr = self.parser.exprs.get(id);
+        let expr = self.syn_expr_pool.get(id);
         let span = expr.span;
         let expr = match expr.kind {
             syn::ExprKind::Un { op, expr } => {
                 let expr = self.analyze_expr(expr)?;
                 if op == UnOp::Addr && !expr.kind.is_lvalue() {
-                    return err!(at: span, "cannot take address of rvalue expression");
+                    return err!(at: span, "can't take address of rvalue expression");
                 }
-                let ty = self.un_on_ty(op, expr.ty, span)?;
-                let expr = self.exprs.insert(expr);
-                let expr = ast::Expr {
+                let ty = match self.types.apply_un(op, expr.ty) {
+                    Some(ty) => ty,
+                    None => {
+                        return err!(at: span, "can't apply unary operator `{op}` on type `{}`", self.types.display(expr.ty))
+                    }
+                };
+                let expr = self.expr_pool.insert(expr);
+                ast::Expr {
                     kind: ast::ExprKind::Un { op, expr },
                     ty,
                     span,
-                };
-                expr
+                }
             }
-            syn::ExprKind::Bin { op, lhs, rhs } => todo!(),
-            syn::ExprKind::Call { func, args } => todo!(),
+            syn::ExprKind::Bin { op, lhs, rhs } => {
+                let lhs = self.analyze_expr(lhs)?;
+                let rhs = self.analyze_expr(rhs)?;
+                let ty = match self.types.apply_bin(op, lhs.ty, rhs.ty) {
+                    Some(ty) => ty,
+                    None => {
+                        return err!(
+                            at: span,
+                            "can't apply binary operator `{}` on types `{}` and `{}`",
+                            op,
+                            self.types.display(lhs.ty),
+                            self.types.display(rhs.ty)
+                        )
+                    }
+                };
+                let lhs = self.expr_pool.insert(lhs);
+                let rhs = self.expr_pool.insert(rhs);
+                ast::Expr {
+                    kind: ast::ExprKind::Bin { op, lhs, rhs },
+                    ty,
+                    span,
+                }
+            }
+            syn::ExprKind::Call { func, args } => match self.funcs.get(&func) {
+                Some(decl) => {
+                    if args.len() != decl.params.len() {
+                        let ident = self.idents.resolve(func);
+                        return err!(at: expr.span, "function `{ident}` expects {} arguments, found {}", args.len(), decl.params.len());
+                    }
+                    let ty = decl.ret_ty;
+                    let params = decl.params.clone();
+                    let start = self.expr_pool.len();
+                    let mut end = start;
+                    for (i, (arg, param)) in args.zip(params).enumerate() {
+                        let arg = self.analyze_expr(arg)?;
+                        if arg.ty != param.ty {
+                            let func = self.idents.resolve(func);
+                            return match param.ident {
+                                Some(param_name) => {
+                                    err!(
+                                        at: arg.span,
+                                        "function `{func}` expects `{}` for parameter {} ({}), found `{}`",
+                                        self.types.display(param.ty),
+                                        i + 1,
+                                        self.idents.resolve(param_name),
+                                        self.types.display(arg.ty)
+                                    )
+                                }
+                                None => {
+                                    err!(
+                                        at: arg.span,
+                                        "function `{func}` expects `{}` for parameter {}, found `{}`",
+                                        self.types.display(param.ty),
+                                        i + 1,
+                                        self.types.display(arg.ty)
+                                    )
+                                }
+                            };
+                        }
+                        end = self.expr_pool.insert(arg).to_usize();
+                    }
+                    let args = Span::new(start, end);
+                    ast::Expr {
+                        kind: ast::ExprKind::Call { func, args },
+                        ty,
+                        span,
+                    }
+                }
+                None => {
+                    let func = self.idents.resolve(func);
+                    return err!(at: expr.span, "can't find function `{func}` in this scope");
+                }
+            },
             syn::ExprKind::Bool { val } => ast::Expr {
                 kind: ast::ExprKind::Bool { val },
-                ty: self.parser.types.intern(ast::Ty::Bool),
+                ty: Types::BOOL,
                 span: expr.span,
             },
             syn::ExprKind::Int { val } => ast::Expr {
                 kind: ast::ExprKind::Int { val },
-                ty: self.parser.types.intern(ast::Ty::I32),
+                ty: Types::I32,
                 span: expr.span,
             },
             syn::ExprKind::Str => todo!("strings"),
@@ -239,61 +397,67 @@ impl<'a> Analyzer<'a> {
     }
 
     fn resolve_var(&mut self, ident_id: IdentId, span: Span) -> Result<Var> {
-        match self.var_table.resolve(&ident_id) {
-            Some(var_id) => Ok(*self.vars.get(var_id).expect("undefined variable")),
+        match self.vars.resolve(ident_id) {
+            Some(var) => Ok(var),
             None => {
-                let ident = self.parser.idents().resolve(ident_id);
-                err!(at: span, "undefined variable `{ident}`")
+                let ident = self.idents.resolve(ident_id);
+                err!(at: span, "can't find variable `{ident}` in this scope")
             }
         }
     }
+}
 
-    fn un_on_ty(&mut self, op: UnOp, ty_id: TyId, span: Span) -> Result<TyId> {
-        let ty = self.parser.types.resolve(ty_id);
-        let ty = match ty {
-            ast::Ty::Void => match op {
-                UnOp::Plus | UnOp::Minus | UnOp::BitwiseNot | UnOp::LogicalNot => {
-                    return err!(at: span, "invalid operation on expression of primitive type `void`")
-                }
-                UnOp::Deref => {
-                    return err!(at: span, "can't dereference expression of primitive type `void`")
-                }
-                UnOp::Addr => ast::Ty::Pointer(ty_id),
-            },
-            ast::Ty::Bool => match op {
-                UnOp::Plus | UnOp::Minus | UnOp::BitwiseNot | UnOp::LogicalNot => {
-                    return err!(at: span, "invalid operation on expression of primitive type `bool`")
-                }
-                UnOp::Deref => {
-                    return err!(at: span, "can't dereference expression of primitive type `bool`")
-                }
-                UnOp::Addr => ast::Ty::Pointer(ty_id),
-            },
-            ast::Ty::I32 => match op {
-                UnOp::Plus => ast::Ty::I32,
-                UnOp::Minus => ast::Ty::I32,
-                UnOp::BitwiseNot => ast::Ty::I32,
-                UnOp::LogicalNot => ast::Ty::I32,
-                UnOp::Deref => {
-                    return err!(at: span, "can't dereference expression of primitive type `i32`")
-                }
-                UnOp::Addr => ast::Ty::Pointer(ty_id),
-            },
-            ast::Ty::Pointer(pointee_ty_id) => match op {
-                UnOp::Plus | UnOp::Minus | UnOp::BitwiseNot | UnOp::LogicalNot => {
-                    return err!(at: span, "invalid operation on expression of primitive type `bool`")
-                }
-                UnOp::Deref => return Ok(*pointee_ty_id),
-                UnOp::Addr => ast::Ty::Pointer(ty_id),
-            },
-            ast::Ty::Struct(ident_id) => todo!("structs"),
-        };
-        Ok(self.parser.types.intern(ty))
-    }
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum InLoop {
+    No,
+    Yes,
 }
 
 #[derive(Clone, Hash, Debug)]
 pub struct Error {
     pub message: String,
     pub span: Span,
+}
+
+#[derive(Copy, Clone, Hash, Debug)]
+pub struct Var {
+    pub id: VarId,
+    pub ty: TyId,
+}
+
+#[derive(Debug)]
+pub struct Vars {
+    table: SymbolTable<IdentId, VarId>,
+    map: HashMap<VarId, TyId>,
+}
+
+impl Vars {
+    pub fn new() -> Self {
+        Self {
+            table: SymbolTable::new(),
+            map: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, ident: IdentId, ty: TyId) -> VarId {
+        let id = self.table.insert(ident);
+        self.map.insert(id, ty);
+        id
+    }
+
+    pub fn resolve(&self, ident: IdentId) -> Option<Var> {
+        let id = self.table.resolve(&ident)?;
+        Some(Var {
+            id: *id,
+            ty: self.map[id],
+        })
+    }
+
+    pub fn enter_scope(&mut self) {
+        self.table.enter_scope();
+    }
+
+    pub fn exit_scope(&mut self) {
+        self.table.exit_scope();
+    }
 }

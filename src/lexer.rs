@@ -15,7 +15,7 @@ pub struct Lexer<'a> {
     rem: usize,
     pos: usize,
     peeked: Option<Token>,
-    idents: StringInterner<IdentId>,
+    pub idents: StringInterner<IdentId>,
 }
 
 impl<'a> Lexer<'a> {
@@ -283,10 +283,6 @@ impl<'a> Lexer<'a> {
         };
 
         Token::new(kind, self.bumped_span())
-    }
-
-    pub fn idents(&self) -> &StringInterner<IdentId> {
-        &self.idents
     }
 
     pub fn str(&self, span: Span) -> Result<String, BadTokenKind> {

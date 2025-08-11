@@ -1,7 +1,10 @@
+use std::fmt;
+
 use crate::handle::impl_handle;
 use crate::span::Span;
 use crate::token::IdentId;
 use crate::token::Symbol;
+pub use crate::ty::{Ty, TyId};
 
 pub type Syn = Vec<Item>;
 
@@ -36,7 +39,7 @@ pub struct FuncDecl {
 
 #[derive(Copy, Clone, Debug, Hash)]
 pub struct VarDecl {
-    pub var: Option<IdentId>,
+    pub ident: Option<IdentId>,
     pub ty: TyId,
     pub span: Span,
 }
@@ -104,6 +107,20 @@ pub enum UnOp {
     Addr,
 }
 
+impl fmt::Display for UnOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let r = match self {
+            UnOp::Plus => "+",
+            UnOp::Minus => "-",
+            UnOp::BitwiseNot => "~",
+            UnOp::LogicalNot => "!",
+            UnOp::Deref => "*",
+            UnOp::Addr => "&",
+        };
+        f.write_str(r)
+    }
+}
+
 impl UnOp {
     pub fn binding_power(&self) -> ((), u8) {
         ((), 21)
@@ -146,6 +163,35 @@ pub enum BinOp {
     ArraySubscript,
     MemberAccess,
     IndirectMemberAccess,
+}
+
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let r = match self {
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Mul => "*",
+            BinOp::Div => "/",
+            BinOp::Rem => "%",
+            BinOp::BitwiseAnd => "%",
+            BinOp::BitwiseOr => "|",
+            BinOp::BitwiseXor => "^",
+            BinOp::BitwiseLeftShift => "<<",
+            BinOp::BitwiseRightShift => ">>",
+            BinOp::LogicalAnd => "&&",
+            BinOp::LogicalOr => "||",
+            BinOp::EqualTo => "==",
+            BinOp::NotEqualTo => "!=",
+            BinOp::LessThan => "<",
+            BinOp::GreaterThan => ">",
+            BinOp::LessThanOrEqualTo => "<=",
+            BinOp::GreaterThanOrEqualTo => ">=",
+            BinOp::ArraySubscript => "[]",
+            BinOp::MemberAccess => ".",
+            BinOp::IndirectMemberAccess => "->",
+        };
+        f.write_str(r)
+    }
 }
 
 impl BinOp {
@@ -196,16 +242,6 @@ impl BinOp {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
-pub enum Ty {
-    Void,
-    Bool,
-    I32,
-    Pointer(TyId),
-    Struct(IdentId),
-}
-
 impl_handle! {
-    pub struct TyId(u32);
     pub struct ExprId(u32);
 }

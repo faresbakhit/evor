@@ -25,8 +25,8 @@ fn main() -> ExitCode {
     let mut parser = Parser::new(Lexer::new(&input));
     match match parser.parse() {
         Ok(prog) => {
-            // println!("{prog:#?}");
-            let mut analyzer = Analyzer::new(parser);
+            let (idents, types, expr_pool) = parser.destruct();
+            let mut analyzer = Analyzer::new(idents, expr_pool, types);
             match analyzer.analyze(prog) {
                 Ok(prog) => {
                     println!("{prog:#?}");

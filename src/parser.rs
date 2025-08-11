@@ -10,12 +10,13 @@ use crate::token::Keyword::*;
 use crate::token::Symbol::*;
 use crate::token::TokenKind::*;
 use crate::token::*;
+use crate::ty::Types;
 
 #[derive(Debug)]
 pub struct Parser<'a> {
     tokens: Lexer<'a>,
-    pub types: Interner<Ty, TyId>,
-    pub exprs: Pool<Expr, ExprId>,
+    types: Types,
+    expr_pool: Pool<Expr, ExprId>,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -38,8 +39,8 @@ impl<'a> Parser<'a> {
     pub fn new(lexer: Lexer<'a>) -> Self {
         Self {
             tokens: lexer,
-            types: Interner::new(),
-            exprs: Pool::new(),
+            types: Types::new(),
+            expr_pool: Pool::new(),
         }
     }
 
@@ -112,16 +113,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn idents(&self) -> &StringInterner<IdentId> {
-        self.tokens.idents()
-    }
-
-    pub fn ty_display(&self, id: TyId) -> TyDisplay {
-        TyDisplay {
-            id,
-            types: &self.types,
-            idents: self.idents(),
-        }
+    pub fn destruct(self) -> (StringInterner<IdentId>, Types, Pool<Expr, ExprId>) {
+        (self.tokens.idents, self.types, self.expr_pool)
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>> {
@@ -136,6 +129,7 @@ impl<'a> Parser<'a> {
 
     fn parse_stmt(&mut self) -> Result<Stmt> {
         let token = self.tokens.peek();
+        let start = token.span.start();
         let stmt = match token.kind {
             Kw(Var) => {
                 self.tokens.next();
@@ -148,14 +142,14 @@ impl<'a> Parser<'a> {
                         match token.kind {
                             Sym(Equal) => {
                                 let expr = self.parse_expr()?;
-                                self.expect(Semicolon)?;
+                                let span = self.expect(Semicolon)?;
                                 Stmt {
                                     kind: StmtKind::VarDecl {
                                         ident,
                                         ty: Some(ty),
                                         init: Some(expr),
                                     },
-                                    span: Span::dumb(),
+                                    span: Span::new(start, span.end()),
                                 }
                             }
                             Sym(Semicolon) => Stmt {
@@ -164,21 +158,21 @@ impl<'a> Parser<'a> {
                                     ty: Some(ty),
                                     init: None,
                                 },
-                                span: Span::dumb(),
+                                span: Span::new(start, token.span.end()),
                             },
                             _ => return expected!("`=` or `;`", found: token),
                         }
                     }
                     Sym(Equal) => {
                         let expr = self.parse_expr()?;
-                        self.expect(Semicolon)?;
+                        let span = self.expect(Semicolon)?;
                         Stmt {
                             kind: StmtKind::VarDecl {
                                 ident,
                                 ty: None,
                                 init: Some(expr),
                             },
-                            span: Span::dumb(),
+                            span: Span::new(start, span.end()),
                         }
                     }
                     Sym(Semicolon) => Stmt {
@@ -187,7 +181,7 @@ impl<'a> Parser<'a> {
                             ty: None,
                             init: None,
                         },
-                        span: Span::dumb(),
+                        span: Span::new(start, token.span.end()),
                     },
                     _ => return expected!("one of `:`, `=`, or `;`", found: token),
                 };
@@ -221,34 +215,35 @@ impl<'a> Parser<'a> {
             }
             Kw(Return) => {
                 self.tokens.next();
+                let expr = if !self.tokens.next_is(Sym(Semicolon)) {
+                    let expr = self.parse_expr()?;
+                    Some(expr)
+                } else {
+                    None
+                };
+                let span = self.expect(Semicolon)?;
+                let span = Span::new(start, span.end());
                 Stmt {
-                    kind: StmtKind::Return {
-                        expr: if self.tokens.peek().kind == Sym(Semicolon) {
-                            self.tokens.next();
-                            None
-                        } else {
-                            let expr = self.parse_expr()?;
-                            self.expect(Semicolon)?;
-                            Some(expr)
-                        },
-                    },
-                    span: Span::dumb(),
+                    kind: StmtKind::Return { expr },
+                    span,
                 }
             }
             Kw(Break) => {
                 self.tokens.next();
-                self.expect(Semicolon)?;
+                let span = self.expect(Semicolon)?;
+                let span = Span::new(start, span.end());
                 Stmt {
                     kind: StmtKind::Break,
-                    span: Span::dumb(),
+                    span,
                 }
             }
             Kw(Continue) => {
                 self.tokens.next();
-                self.expect(Semicolon)?;
+                let span = self.expect(Semicolon)?;
+                let span = Span::new(start, span.end());
                 Stmt {
-                    kind: StmtKind::Break,
-                    span: Span::dumb(),
+                    kind: StmtKind::Continue,
+                    span,
                 }
             }
             _ => {
@@ -276,15 +271,16 @@ impl<'a> Parser<'a> {
 
     fn parse_expr(&mut self) -> Result<ExprId> {
         let expr = self.parse_expr_with_bp(0)?;
-        Ok(self.exprs.insert(expr))
+        Ok(self.expr_pool.insert(expr))
     }
 
     fn parse_expr_with_bp(&mut self, min_bp: u8) -> Result<Expr> {
         let token = self.tokens.next();
         let mut lhs = match token.kind {
             Sym(OpenParen) => {
-                let r = self.parse_expr_with_bp(0)?;
+                let mut r = self.parse_expr_with_bp(0)?;
                 self.expect(CloseParen)?;
+                r.span = Span::new(r.span.start(), r.span.end() + 1);
                 r
             }
             Sym(sym) => {
@@ -298,7 +294,7 @@ impl<'a> Parser<'a> {
                 Expr {
                     kind: ExprKind::Un {
                         op,
-                        expr: self.exprs.insert(expr),
+                        expr: self.expr_pool.insert(expr),
                     },
                     span: Span::new(token.span.start(), end),
                 }
@@ -328,7 +324,7 @@ impl<'a> Parser<'a> {
                         self.tokens.next_if(Sym(Comma));
                         end = self.tokens.peek().span.end();
                     }
-                    let args = self.exprs.insert_many(args);
+                    let args = self.expr_pool.insert_many(args);
                     Expr {
                         kind: ExprKind::Call { func: id, args },
                         span: Span::new(token.span.start(), end),
@@ -364,8 +360,8 @@ impl<'a> Parser<'a> {
             lhs = Expr {
                 kind: ExprKind::Bin {
                     op,
-                    lhs: self.exprs.insert(lhs),
-                    rhs: self.exprs.insert(rhs),
+                    lhs: self.expr_pool.insert(lhs),
+                    rhs: self.expr_pool.insert(rhs),
                 },
                 span,
             };
@@ -378,7 +374,7 @@ impl<'a> Parser<'a> {
         loop {
             let token = self.tokens.peek();
             let start = token.span.start();
-            let var = match token.kind {
+            let ident = match token.kind {
                 Ident(id) => Some(id),
                 Kw(Underscore) => None,
                 Sym(sym) if sym == closing_sym => break Ok(params),
@@ -388,7 +384,7 @@ impl<'a> Parser<'a> {
             self.expect(Colon)?;
             let (ty, ty_span) = self.parse_type()?;
             let span = Span::new(start, ty_span.end());
-            params.push(VarDecl { var, ty, span });
+            params.push(VarDecl { ident, ty, span });
             let token = self.tokens.peek();
             match token.kind {
                 Sym(Comma) => {
@@ -405,14 +401,14 @@ impl<'a> Parser<'a> {
         let start = token.span.start();
         let mut end = token.span.end();
         let mut ty = match token.kind {
-            Kw(Void) => self.types.intern(Ty::Void),
-            Kw(Bool) => self.types.intern(Ty::Bool),
-            Kw(I32) => self.types.intern(Ty::I32),
-            Ident(id) => self.types.intern(Ty::Struct(id)),
+            Kw(Void) => Types::VOID,
+            Kw(Bool) => Types::BOOL,
+            Kw(I32) => Types::I32,
+            Ident(id) => todo!("user-defined types"),
             _ => return expected!("type", found: token),
         };
         while let Sym(Star) = self.tokens.peek().kind {
-            ty = self.types.intern(Ty::Pointer(ty));
+            ty = self.types.insert(Ty::Pointer(ty));
             end = self.tokens.next().span.end();
         }
         Ok((ty, Span::new(start, end)))
@@ -459,10 +455,6 @@ impl<'p> fmt::Display for TyDisplay<'p> {
                     idents: self.idents
                 }
             ),
-            Ty::Struct(ident_id) => {
-                f.write_str("struct ")?;
-                f.write_str(self.idents.resolve(*ident_id))
-            }
         }
     }
 }

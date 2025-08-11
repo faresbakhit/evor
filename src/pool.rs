@@ -1,5 +1,5 @@
 use crate::{handle::Handle, span::Span};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Index};
 
 /// A [`Handle`]/index-based arena without deletion.
 ///
@@ -31,7 +31,28 @@ impl<T, H: Handle> Pool<T, H> {
         Span::new(start, self.vec.len())
     }
 
-    pub fn get(&self, handle: H) -> &T {
-        &self.vec[handle.to_usize()]
+    pub fn get<I>(&self, index: I) -> &<Self as Index<I>>::Output
+    where
+        Pool<T, H>: Index<I>,
+    {
+        self.index(index)
+    }
+
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+}
+
+impl<T, H: Handle> Index<H> for Pool<T, H> {
+    type Output = T;
+    fn index(&self, index: H) -> &Self::Output {
+        &self.vec[index.to_usize()]
+    }
+}
+
+impl<T, H: Handle> Index<Span<H>> for Pool<T, H> {
+    type Output = [T];
+    fn index(&self, index: Span<H>) -> &Self::Output {
+        &self.vec[index.as_range()]
     }
 }

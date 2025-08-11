@@ -81,7 +81,7 @@ impl<Symbol: Eq + Hash, H: Handle, S: BuildHasher> SymbolTable<Symbol, H, S> {
     }
 
     /// Retrieve the handle associated with a symbol, if any.
-    pub fn resolve<Q: ?Sized>(&mut self, k: &Q) -> Option<&H>
+    pub fn resolve<Q: ?Sized>(&self, k: &Q) -> Option<&H>
     where
         Symbol: Borrow<Q>,
         Q: Hash + Eq,
@@ -99,7 +99,7 @@ impl<Symbol: Eq + Hash, H: Handle, S: BuildHasher> SymbolTable<Symbol, H, S> {
     /// # Note
     ///
     /// This is not actually used, but I'm keeping it for benchmarks.
-    pub unsafe fn resolve_unchecked<Q: ?Sized>(&mut self, k: &Q) -> Option<&H>
+    pub unsafe fn resolve_unchecked<Q: ?Sized>(&self, k: &Q) -> Option<&H>
     where
         Symbol: Borrow<Q>,
         Q: Hash + Eq,
