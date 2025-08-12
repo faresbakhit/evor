@@ -1,16 +1,12 @@
-use std::fmt;
-
-use crate::interner::Interner;
-use crate::interner::StringInterner;
-use crate::lexer::Lexer;
-use crate::pool::Pool;
-use crate::span::Span;
-use crate::syn::*;
-use crate::token::Keyword::*;
-use crate::token::Symbol::*;
-use crate::token::TokenKind::*;
-use crate::token::*;
-use crate::ty::Types;
+use crate::{
+    interner::{Interner, StringInterner},
+    lexer::Lexer,
+    pool::Pool,
+    span::Span,
+    syn::*,
+    token::{Keyword::*, Symbol::*, TokenKind::*, *},
+    types::{Ty, TyId, Types},
+};
 
 #[derive(Debug)]
 pub struct Parser<'a> {
@@ -404,7 +400,7 @@ impl<'a> Parser<'a> {
             Kw(Void) => Types::VOID,
             Kw(Bool) => Types::BOOL,
             Kw(I32) => Types::I32,
-            Ident(id) => todo!("user-defined types"),
+            Ident(_) => todo!("user-defined types"),
             _ => return expected!("type", found: token),
         };
         while let Sym(Star) = self.tokens.peek().kind {
@@ -429,32 +425,6 @@ impl<'a> Parser<'a> {
             Ok(token.span)
         } else {
             expected!(sym, found: token)
-        }
-    }
-}
-
-pub struct TyDisplay<'p> {
-    id: TyId,
-    types: &'p Interner<Ty, TyId>,
-    idents: &'p StringInterner<IdentId>,
-}
-
-impl<'p> fmt::Display for TyDisplay<'p> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ty = self.types.resolve(self.id);
-        match ty {
-            Ty::Void => f.write_str("void"),
-            Ty::Bool => f.write_str("bool"),
-            Ty::I32 => f.write_str("i32"),
-            Ty::Pointer(pointee_id) => write!(
-                f,
-                "{}*",
-                TyDisplay {
-                    id: *pointee_id,
-                    types: self.types,
-                    idents: self.idents
-                }
-            ),
         }
     }
 }

@@ -1,25 +1,24 @@
-use std::{any::Any, collections::HashMap};
+use std::collections::HashMap;
 
 use crate::{
-    ast::{self, BinOp, Expr, Ty, TyId, UnOp, VarId},
+    ast::{self, Expr, UnOp},
     handle::Handle,
     interner::StringInterner,
-    parser::Parser,
     pool::Pool,
     span::Span,
-    symbol_table::SymbolTable,
     syn::{self, FuncDecl},
     token::IdentId,
-    ty::Types,
+    types::{Ty, TyId, Types},
+    vars::Vars,
 };
 
 #[derive(Debug)]
 pub struct Analyzer {
     idents: StringInterner<IdentId>,
     syn_expr_pool: Pool<syn::Expr, syn::ExprId>,
+    types: Types,
     expr_pool: Pool<ast::Expr, ast::ExprId>,
     funcs: HashMap<IdentId, FuncDecl>,
-    types: Types,
     vars: Vars,
 }
 
@@ -27,10 +26,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 macro_rules! err {
     (at: $at:expr, $($arg:tt)*) => {
-        Err(Error {
-            message: format!($($arg)*),
-            span: $at,
-        })
+        Err(Error { message: format!($($arg)*), span: $at })
     };
 }
 
@@ -43,14 +39,14 @@ impl Analyzer {
         Self {
             idents,
             syn_expr_pool,
+            types,
             expr_pool: Pool::new(),
             funcs: HashMap::new(),
-            types,
             vars: Vars::new(),
         }
     }
 
-    pub fn analyze(&mut self, prog: syn::Syn) -> Result<ast::AST> {
+    pub fn analyze(&mut self, prog: syn::Syn) -> Result<ast::Ast> {
         for item in prog.iter() {
             match item {
                 syn::Item::Struct(_) => todo!("structs"),
@@ -123,7 +119,7 @@ impl Analyzer {
         let kind = match stmt.kind {
             syn::StmtKind::VarDecl { ident, ty, init } => match (ty, init) {
                 (Some(ty), Some(expr)) => {
-                    if (ty == Types::VOID) {
+                    if ty == Types::VOID {
                         return err!(at: span, "can't declare variable with type `void`");
                     }
                     let expr = self.analyze_expr(expr)?;
@@ -184,7 +180,7 @@ impl Analyzer {
                             }),
                         }
                     }
-                    Ty::Pointer(ty_id) => {
+                    Ty::Pointer(_) => {
                         let id = self.vars.insert(ident, ty);
                         ast::StmtKind::Assign {
                             lhs: self.expr_pool.insert(Expr {
@@ -205,7 +201,7 @@ impl Analyzer {
             syn::StmtKind::Assign { lhs, rhs } => {
                 let lhs = self.analyze_expr(lhs)?;
                 let rhs = self.analyze_expr(rhs)?;
-                if (lhs.ty != rhs.ty) {
+                if lhs.ty != rhs.ty {
                     return err!(at: rhs.span, "expected `{}`, found `{}`", self.types.display(lhs.ty), self.types.display(rhs.ty));
                 }
                 ast::StmtKind::Assign {
@@ -322,56 +318,57 @@ impl Analyzer {
                     span,
                 }
             }
-            syn::ExprKind::Call { func, args } => match self.funcs.get(&func) {
-                Some(decl) => {
-                    if args.len() != decl.params.len() {
-                        let ident = self.idents.resolve(func);
-                        return err!(at: expr.span, "function `{ident}` expects {} arguments, found {}", args.len(), decl.params.len());
+            syn::ExprKind::Call { func, args } => {
+                let decl = match self.funcs.get(&func) {
+                    Some(decl) => decl,
+                    None => {
+                        let func = self.idents.resolve(func);
+                        return err!(at: expr.span, "can't find function `{func}` in this scope");
                     }
-                    let ty = decl.ret_ty;
-                    let params = decl.params.clone();
-                    let start = self.expr_pool.len();
-                    let mut end = start;
-                    for (i, (arg, param)) in args.zip(params).enumerate() {
-                        let arg = self.analyze_expr(arg)?;
-                        if arg.ty != param.ty {
-                            let func = self.idents.resolve(func);
-                            return match param.ident {
-                                Some(param_name) => {
-                                    err!(
-                                        at: arg.span,
-                                        "function `{func}` expects `{}` for parameter {} ({}), found `{}`",
-                                        self.types.display(param.ty),
-                                        i + 1,
-                                        self.idents.resolve(param_name),
-                                        self.types.display(arg.ty)
-                                    )
-                                }
-                                None => {
-                                    err!(
-                                        at: arg.span,
-                                        "function `{func}` expects `{}` for parameter {}, found `{}`",
-                                        self.types.display(param.ty),
-                                        i + 1,
-                                        self.types.display(arg.ty)
-                                    )
-                                }
-                            };
-                        }
-                        end = self.expr_pool.insert(arg).to_usize();
-                    }
-                    let args = Span::new(start, end);
-                    ast::Expr {
-                        kind: ast::ExprKind::Call { func, args },
-                        ty,
-                        span,
-                    }
+                };
+                if args.len() != decl.params.len() {
+                    let ident = self.idents.resolve(func);
+                    return err!(at: expr.span, "function `{ident}` expects {} arguments, found {}", decl.params.len(), args.len());
                 }
-                None => {
-                    let func = self.idents.resolve(func);
-                    return err!(at: expr.span, "can't find function `{func}` in this scope");
+                let ty = decl.ret_ty;
+                let params = decl.params.clone();
+                let start = self.expr_pool.len();
+                let mut end = start;
+                for (i, (arg, param)) in args.zip(params).enumerate() {
+                    let arg = self.analyze_expr(arg)?;
+                    if arg.ty != param.ty {
+                        let func = self.idents.resolve(func);
+                        return match param.ident {
+                            Some(param_name) => {
+                                err!(
+                                    at: arg.span,
+                                    "function `{func}` expects `{}` for parameter {} ({}), found `{}`",
+                                    self.types.display(param.ty),
+                                    i + 1,
+                                    self.idents.resolve(param_name),
+                                    self.types.display(arg.ty)
+                                )
+                            }
+                            None => {
+                                err!(
+                                    at: arg.span,
+                                    "function `{func}` expects `{}` for parameter {}, found `{}`",
+                                    self.types.display(param.ty),
+                                    i + 1,
+                                    self.types.display(arg.ty)
+                                )
+                            }
+                        };
+                    }
+                    end = self.expr_pool.insert(arg).to_usize();
                 }
-            },
+                let args = Span::new(start, end);
+                ast::Expr {
+                    kind: ast::ExprKind::Call { func, args },
+                    ty,
+                    span,
+                }
+            }
             syn::ExprKind::Bool { val } => ast::Expr {
                 kind: ast::ExprKind::Bool { val },
                 ty: Types::BOOL,
@@ -385,25 +382,21 @@ impl Analyzer {
             syn::ExprKind::Str => todo!("strings"),
             syn::ExprKind::Var { id } => {
                 let span = expr.span;
-                let var = self.resolve_var(id, span)?;
+                let id = match self.vars.resolve(id) {
+                    Some(var) => var,
+                    None => {
+                        let ident = self.idents.resolve(id);
+                        return err!(at: span, "can't find variable `{ident}` in this scope");
+                    }
+                };
                 ast::Expr {
-                    kind: ast::ExprKind::Var { id: var.id },
-                    ty: var.ty,
+                    kind: ast::ExprKind::Var { id },
+                    ty: self.vars.get_type(id),
                     span,
                 }
             }
         };
         Ok(expr)
-    }
-
-    fn resolve_var(&mut self, ident_id: IdentId, span: Span) -> Result<Var> {
-        match self.vars.resolve(ident_id) {
-            Some(var) => Ok(var),
-            None => {
-                let ident = self.idents.resolve(ident_id);
-                err!(at: span, "can't find variable `{ident}` in this scope")
-            }
-        }
     }
 }
 
@@ -417,47 +410,4 @@ enum InLoop {
 pub struct Error {
     pub message: String,
     pub span: Span,
-}
-
-#[derive(Copy, Clone, Hash, Debug)]
-pub struct Var {
-    pub id: VarId,
-    pub ty: TyId,
-}
-
-#[derive(Debug)]
-pub struct Vars {
-    table: SymbolTable<IdentId, VarId>,
-    map: HashMap<VarId, TyId>,
-}
-
-impl Vars {
-    pub fn new() -> Self {
-        Self {
-            table: SymbolTable::new(),
-            map: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, ident: IdentId, ty: TyId) -> VarId {
-        let id = self.table.insert(ident);
-        self.map.insert(id, ty);
-        id
-    }
-
-    pub fn resolve(&self, ident: IdentId) -> Option<Var> {
-        let id = self.table.resolve(&ident)?;
-        Some(Var {
-            id: *id,
-            ty: self.map[id],
-        })
-    }
-
-    pub fn enter_scope(&mut self) {
-        self.table.enter_scope();
-    }
-
-    pub fn exit_scope(&mut self) {
-        self.table.exit_scope();
-    }
 }

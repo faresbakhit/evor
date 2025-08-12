@@ -1,10 +1,13 @@
-use crate::handle::impl_handle;
-use crate::span::Span;
-use crate::token::IdentId;
+use crate::{
+    span::Span,
+    token::IdentId,
+    types::TyId,
+    {handle::impl_handle, vars::VarId},
+};
 
-pub use crate::syn::{BinOp, Ty, TyId, UnOp, VarDecl};
+pub use crate::syn::{BinOp, UnOp, VarDecl};
 
-pub type AST = Vec<Func>;
+pub type Ast = Vec<Func>;
 
 #[derive(Clone, Debug, Hash)]
 pub struct Func {
@@ -79,5 +82,4 @@ impl ExprKind {
 
 impl_handle! {
     pub struct ExprId(u32);
-    pub struct VarId(u32);
 }

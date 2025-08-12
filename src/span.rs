@@ -1,5 +1,5 @@
 use crate::handle::{impl_handle, Handle};
-use std::ops::{Add, Bound, Index, IndexMut, Range, RangeBounds};
+use std::ops::{Bound, Index, IndexMut, Range, RangeBounds};
 use std::{fmt, mem};
 
 impl_handle! {

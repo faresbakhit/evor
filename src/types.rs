@@ -4,7 +4,6 @@ use crate::{
     ast::{BinOp, UnOp},
     handle::impl_handle,
     interner::Interner,
-    token::IdentId,
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
@@ -97,7 +96,7 @@ pub struct TyDisplay<'p> {
 
 impl<'p> fmt::Display for TyDisplay<'p> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ty = self.hoarder.interner.resolve(self.id);
+        let ty = self.hoarder.get(self.id);
         match ty {
             Ty::Void => f.write_str("void"),
             Ty::Bool => f.write_str("bool"),

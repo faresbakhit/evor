@@ -4,7 +4,7 @@ use crate::handle::impl_handle;
 use crate::span::Span;
 use crate::token::IdentId;
 use crate::token::Symbol;
-pub use crate::ty::{Ty, TyId};
+use crate::types::TyId;
 
 pub type Syn = Vec<Item>;
 
