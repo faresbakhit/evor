@@ -2,9 +2,10 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
-use evorc::analyzer::Analyzer;
+use evorc::analyzer::{self, Analyzer};
 use evorc::lexer::Lexer;
-use evorc::parser::Parser;
+use evorc::normalizer::Normalizer;
+use evorc::parser::{self, Parser};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -24,12 +25,24 @@ fn main() -> ExitCode {
     };
     let mut parser = Parser::new(Lexer::new(&input));
     match match parser.parse() {
-        Ok(prog) => {
-            let (idents, types, expr_pool) = parser.destruct();
+        Ok(syn) => {
+            let parser::Output {
+                idents,
+                types,
+                expr_pool,
+            } = parser.finish();
             let mut analyzer = Analyzer::new(idents, expr_pool, types);
-            match analyzer.analyze(prog) {
-                Ok(prog) => {
-                    println!("{prog:#?}");
+            match analyzer.analyze(syn) {
+                Ok(ast) => {
+                    let analyzer::Output {
+                        idents,
+                        types,
+                        expr_pool,
+                        funcs,
+                        vars,
+                    } = analyzer.finish();
+                    let mut normalizer = Normalizer::new(idents, types, expr_pool, funcs, vars);
+                    println!("{:#?}", normalizer.normalize(ast));
                     Ok(())
                 }
                 Err(err) => Err((err.span, "bad semantics", err.message)),

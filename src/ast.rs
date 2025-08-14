@@ -11,11 +11,17 @@ pub type Ast = Vec<Func>;
 
 #[derive(Clone, Debug, Hash)]
 pub struct Func {
-    pub ident: IdentId,
+    pub name: IdentId,
     pub params: Vec<VarDecl>,
     pub ret_ty: TyId,
     pub block: Vec<Stmt>,
     pub span: Span,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+pub struct FuncDecl {
+    pub domain: Vec<TyId>,
+    pub range: TyId,
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -27,6 +33,10 @@ pub struct Stmt {
 #[derive(Clone, Debug, Hash)]
 pub enum StmtKind {
     Assign {
+        lhs: VarId,
+        rhs: ExprId,
+    },
+    DerefAssign {
         lhs: ExprId,
         rhs: ExprId,
     },
@@ -36,7 +46,7 @@ pub enum StmtKind {
     If {
         cond: ExprId,
         then: Vec<Stmt>,
-        otherwise: Vec<Stmt>,
+        r#else: Vec<Stmt>,
     },
     While {
         cond: ExprId,

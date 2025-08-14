@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{self, Expr, UnOp},
+    ast::{self, Expr, FuncDecl, UnOp},
     handle::Handle,
     interner::StringInterner,
     pool::Pool,
     span::Span,
-    syn::{self, FuncDecl},
+    syn,
     token::IdentId,
     types::{Ty, TyId, Types},
     vars::Vars,
@@ -20,6 +20,15 @@ pub struct Analyzer {
     expr_pool: Pool<ast::Expr, ast::ExprId>,
     funcs: HashMap<IdentId, FuncDecl>,
     vars: Vars,
+}
+
+#[derive(Debug)]
+pub struct Output {
+    pub idents: StringInterner<IdentId>,
+    pub types: Types,
+    pub expr_pool: Pool<Expr, ast::ExprId>,
+    pub funcs: HashMap<IdentId, FuncDecl>,
+    pub vars: Vars,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -46,15 +55,32 @@ impl Analyzer {
         }
     }
 
+    pub fn finish(self) -> Output {
+        Output {
+            idents: self.idents,
+            types: self.types,
+            expr_pool: self.expr_pool,
+            funcs: self.funcs,
+            vars: self.vars,
+        }
+    }
+
     pub fn analyze(&mut self, prog: syn::Syn) -> Result<ast::Ast> {
         for item in prog.iter() {
             match item {
                 syn::Item::Struct(_) => todo!("structs"),
-                syn::Item::Func(func) => {
-                    self.funcs.insert(func.decl.ident, func.decl.clone());
-                }
-                syn::Item::FuncDecl(func_decl) => {
-                    self.funcs.insert(func_decl.ident, func_decl.clone());
+                syn::Item::Func(syn::Func { decl, .. }) | syn::Item::FuncDecl(decl) => {
+                    if self.funcs.get(&decl.name).is_some() {
+                        let name = self.idents.resolve(decl.name);
+                        return err!(at: decl.span, "redefinition of function `{name}`");
+                    }
+                    self.funcs.insert(
+                        decl.name,
+                        FuncDecl {
+                            domain: decl.params.iter().map(|p| p.ty).collect(),
+                            range: decl.ret_ty,
+                        },
+                    );
                 }
             }
         }
@@ -71,7 +97,7 @@ impl Analyzer {
                         }
                     }
                     let func = ast::Func {
-                        ident: func.decl.ident,
+                        name: func.decl.name,
                         params: func.decl.params,
                         ret_ty: func.decl.ret_ty,
                         block: match func
@@ -128,11 +154,7 @@ impl Analyzer {
                     }
                     let id = self.vars.insert(ident, expr.ty);
                     ast::StmtKind::Assign {
-                        lhs: self.expr_pool.insert(Expr {
-                            kind: ast::ExprKind::Var { id },
-                            ty,
-                            span: Span::dumb(),
-                        }),
+                        lhs: id,
                         rhs: self.expr_pool.insert(expr),
                     }
                 }
@@ -140,11 +162,7 @@ impl Analyzer {
                     let expr = self.analyze_expr(expr)?;
                     let id = self.vars.insert(ident, expr.ty);
                     ast::StmtKind::Assign {
-                        lhs: self.expr_pool.insert(Expr {
-                            kind: ast::ExprKind::Var { id },
-                            ty: expr.ty,
-                            span: Span::dumb(),
-                        }),
+                        lhs: id,
                         rhs: self.expr_pool.insert(expr),
                     }
                 }
@@ -153,11 +171,7 @@ impl Analyzer {
                     Ty::Bool => {
                         let id = self.vars.insert(ident, ty);
                         ast::StmtKind::Assign {
-                            lhs: self.expr_pool.insert(Expr {
-                                kind: ast::ExprKind::Var { id },
-                                ty,
-                                span: Span::dumb(),
-                            }),
+                            lhs: id,
                             rhs: self.expr_pool.insert(ast::Expr {
                                 kind: ast::ExprKind::Bool { val: false },
                                 ty,
@@ -168,13 +182,20 @@ impl Analyzer {
                     Ty::I32 => {
                         let id = self.vars.insert(ident, ty);
                         ast::StmtKind::Assign {
-                            lhs: self.expr_pool.insert(Expr {
-                                kind: ast::ExprKind::Var { id },
+                            lhs: id,
+                            rhs: self.expr_pool.insert(ast::Expr {
+                                kind: ast::ExprKind::Int { val: 0 },
                                 ty,
                                 span: Span::dumb(),
                             }),
+                        }
+                    }
+                    Ty::U8 => {
+                        let id = self.vars.insert(ident, ty);
+                        ast::StmtKind::Assign {
+                            lhs: id,
                             rhs: self.expr_pool.insert(ast::Expr {
-                                kind: ast::ExprKind::Int { val: 0 },
+                                kind: ast::ExprKind::Int { val: 255 },
                                 ty,
                                 span: Span::dumb(),
                             }),
@@ -183,11 +204,7 @@ impl Analyzer {
                     Ty::Pointer(_) => {
                         let id = self.vars.insert(ident, ty);
                         ast::StmtKind::Assign {
-                            lhs: self.expr_pool.insert(Expr {
-                                kind: ast::ExprKind::Var { id },
-                                ty,
-                                span: Span::dumb(),
-                            }),
+                            lhs: id,
                             rhs: self.expr_pool.insert(ast::Expr {
                                 kind: ast::ExprKind::Int { val: 0 },
                                 ty,
@@ -204,9 +221,18 @@ impl Analyzer {
                 if lhs.ty != rhs.ty {
                     return err!(at: rhs.span, "expected `{}`, found `{}`", self.types.display(lhs.ty), self.types.display(rhs.ty));
                 }
-                ast::StmtKind::Assign {
-                    lhs: self.expr_pool.insert(lhs),
-                    rhs: self.expr_pool.insert(rhs),
+                match lhs.kind {
+                    ast::ExprKind::Un { op, expr } if op == UnOp::Deref => {
+                        ast::StmtKind::DerefAssign {
+                            lhs: expr,
+                            rhs: self.expr_pool.insert(rhs),
+                        }
+                    }
+                    ast::ExprKind::Var { id } => ast::StmtKind::Assign {
+                        lhs: id,
+                        rhs: self.expr_pool.insert(rhs),
+                    },
+                    _ => return err!(at: lhs.span, "not an lvalue expression"),
                 }
             }
             syn::StmtKind::Expr { id } => {
@@ -226,7 +252,7 @@ impl Analyzer {
                 ast::StmtKind::If {
                     cond: self.expr_pool.insert(cond),
                     then: self.analyze_block(then, in_loop, returnable)?,
-                    otherwise: self.analyze_block(otherwise, in_loop, returnable)?,
+                    r#else: self.analyze_block(otherwise, in_loop, returnable)?,
                 }
             }
             syn::StmtKind::While { cond, block } => {
@@ -322,47 +348,33 @@ impl Analyzer {
                 let decl = match self.funcs.get(&func) {
                     Some(decl) => decl,
                     None => {
-                        let func = self.idents.resolve(func);
-                        return err!(at: expr.span, "can't find function `{func}` in this scope");
+                        let name = self.idents.resolve(func);
+                        return err!(at: expr.span, "can't find function `{name}` in this scope");
                     }
                 };
-                if args.len() != decl.params.len() {
-                    let ident = self.idents.resolve(func);
-                    return err!(at: expr.span, "function `{ident}` expects {} arguments, found {}", decl.params.len(), args.len());
+                if args.len() != decl.domain.len() {
+                    let name = self.idents.resolve(func);
+                    return err!(at: expr.span, "function `{name}` expects {} arguments, found {}", decl.domain.len(), args.len());
                 }
-                let ty = decl.ret_ty;
-                let params = decl.params.clone();
+                let ty = decl.range;
+                let params = decl.domain.clone();
                 let start = self.expr_pool.len();
-                let mut end = start;
-                for (i, (arg, param)) in args.zip(params).enumerate() {
+                let mut ast_args = Vec::with_capacity(args.len());
+                for (i, (arg, param_ty)) in args.zip(params).enumerate() {
                     let arg = self.analyze_expr(arg)?;
-                    if arg.ty != param.ty {
+                    if arg.ty != param_ty {
                         let func = self.idents.resolve(func);
-                        return match param.ident {
-                            Some(param_name) => {
-                                err!(
-                                    at: arg.span,
-                                    "function `{func}` expects `{}` for parameter {} ({}), found `{}`",
-                                    self.types.display(param.ty),
-                                    i + 1,
-                                    self.idents.resolve(param_name),
-                                    self.types.display(arg.ty)
-                                )
-                            }
-                            None => {
-                                err!(
-                                    at: arg.span,
-                                    "function `{func}` expects `{}` for parameter {}, found `{}`",
-                                    self.types.display(param.ty),
-                                    i + 1,
-                                    self.types.display(arg.ty)
-                                )
-                            }
-                        };
+                        return err!(
+                            at: arg.span,
+                            "function `{func}` expects `{}` for parameter {}, found `{}`",
+                            self.types.display(param_ty),
+                            i + 1,
+                            self.types.display(arg.ty)
+                        );
                     }
-                    end = self.expr_pool.insert(arg).to_usize();
+                    ast_args.push(arg);
                 }
-                let args = Span::new(start, end);
+                let args = self.expr_pool.insert_many(ast_args);
                 ast::Expr {
                     kind: ast::ExprKind::Call { func, args },
                     ty,
@@ -379,7 +391,11 @@ impl Analyzer {
                 ty: Types::I32,
                 span: expr.span,
             },
-            syn::ExprKind::Str => todo!("strings"),
+            syn::ExprKind::Str => ast::Expr {
+                kind: ast::ExprKind::Str,
+                ty: Types::STR,
+                span: expr.span,
+            },
             syn::ExprKind::Var { id } => {
                 let span = expr.span;
                 let id = match self.vars.resolve(id) {

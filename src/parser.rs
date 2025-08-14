@@ -15,6 +15,12 @@ pub struct Parser<'a> {
     expr_pool: Pool<Expr, ExprId>,
 }
 
+pub struct Output {
+    pub idents: StringInterner<IdentId>,
+    pub types: Types,
+    pub expr_pool: Pool<Expr, ExprId>,
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 macro_rules! expected {
@@ -37,6 +43,14 @@ impl<'a> Parser<'a> {
             tokens: lexer,
             types: Types::new(),
             expr_pool: Pool::new(),
+        }
+    }
+
+    pub fn finish(self) -> Output {
+        Output {
+            idents: self.tokens.idents(),
+            types: self.types,
+            expr_pool: self.expr_pool,
         }
     }
 
@@ -83,7 +97,7 @@ impl<'a> Parser<'a> {
                             let end = self.tokens.next().span.end();
                             let span = Span::new(start, end);
                             let decl = FuncDecl {
-                                ident,
+                                name: ident,
                                 params,
                                 ret_ty,
                                 span,
@@ -94,7 +108,7 @@ impl<'a> Parser<'a> {
                         Sym(Semicolon) => {
                             let span = Span::new(start, token.span.end());
                             let decl = FuncDecl {
-                                ident,
+                                name: ident,
                                 params,
                                 ret_ty,
                                 span,
@@ -107,10 +121,6 @@ impl<'a> Parser<'a> {
             };
             syn.push(item);
         }
-    }
-
-    pub fn destruct(self) -> (StringInterner<IdentId>, Types, Pool<Expr, ExprId>) {
-        (self.tokens.idents, self.types, self.expr_pool)
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>> {
@@ -275,8 +285,8 @@ impl<'a> Parser<'a> {
         let mut lhs = match token.kind {
             Sym(OpenParen) => {
                 let mut r = self.parse_expr_with_bp(0)?;
-                self.expect(CloseParen)?;
-                r.span = Span::new(r.span.start(), r.span.end() + 1);
+                let end = self.expect(CloseParen)?.end();
+                r.span = Span::new(token.span.start(), end);
                 r
             }
             Sym(sym) => {
@@ -336,6 +346,28 @@ impl<'a> Parser<'a> {
         };
         while let Token { kind: Sym(sym), .. } = self.tokens.peek() {
             let sym = *sym;
+            if sym == OpenBracket {
+                self.tokens.next();
+                let rhs = self.parse_expr_with_bp(0)?;
+                let end = self.expect(CloseBracket)?.end();
+                let span = Span::new(lhs.span.start(), end);
+                lhs = Expr {
+                    kind: ExprKind::Bin {
+                        op: BinOp::Add,
+                        lhs: self.expr_pool.insert(lhs),
+                        rhs: self.expr_pool.insert(rhs),
+                    },
+                    span,
+                };
+                lhs = Expr {
+                    kind: ExprKind::Un {
+                        op: UnOp::Deref,
+                        expr: self.expr_pool.insert(lhs),
+                    },
+                    span,
+                };
+                continue;
+            }
             let op = match BinOp::from_sym(sym) {
                 Some(op) => op,
                 None => break,
@@ -347,19 +379,13 @@ impl<'a> Parser<'a> {
             self.tokens.next();
             let rhs = self.parse_expr_with_bp(r_bp)?;
 
-            let span = if sym == OpenBracket {
-                // array subscript
-                Span::new(lhs.span.start(), self.expect(CloseBracket)?.end())
-            } else {
-                Span::new(lhs.span.start(), rhs.span.end())
-            };
             lhs = Expr {
                 kind: ExprKind::Bin {
                     op,
                     lhs: self.expr_pool.insert(lhs),
                     rhs: self.expr_pool.insert(rhs),
                 },
-                span,
+                span: Span::new(lhs.span.start(), rhs.span.end()),
             };
         }
         Ok(lhs)
@@ -396,17 +422,19 @@ impl<'a> Parser<'a> {
         let token = self.tokens.next();
         let start = token.span.start();
         let mut end = token.span.end();
-        let mut ty = match token.kind {
+        let ty = match token.kind {
             Kw(Void) => Types::VOID,
             Kw(Bool) => Types::BOOL,
             Kw(I32) => Types::I32,
+            Kw(U8) => Types::U8,
+            Sym(Star) => {
+                let (pointee_ty, span) = self.parse_type()?;
+                end = span.end();
+                self.types.insert(Ty::Pointer(pointee_ty))
+            }
             Ident(_) => todo!("user-defined types"),
             _ => return expected!("type", found: token),
         };
-        while let Sym(Star) = self.tokens.peek().kind {
-            ty = self.types.insert(Ty::Pointer(ty));
-            end = self.tokens.next().span.end();
-        }
         Ok((ty, Span::new(start, end)))
     }
 

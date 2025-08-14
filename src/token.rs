@@ -95,7 +95,7 @@ pub enum Symbol {
     CloseBrace,
     /// `[`
     OpenBracket,
-    /// `[`
+    /// `]`
     CloseBracket,
     /// `~`
     Tilde,
@@ -168,7 +168,7 @@ impl fmt::Display for Symbol {
             OpenBrace => "`{`",
             CloseBrace => "`}`",
             OpenBracket => "`[`",
-            CloseBracket => "`[`",
+            CloseBracket => "`]`",
             Tilde => "`~`",
             Colon => "`:`",
             Comma => "`,`",
@@ -222,6 +222,8 @@ pub enum Keyword {
     Struct,
     /// `true`
     True,
+    /// `u8`
+    U8,
     /// `_`
     Underscore,
     /// `var`
@@ -247,6 +249,7 @@ impl fmt::Display for Keyword {
             Return => "keyword `return`",
             Struct => "keyword `struct`",
             True => "keyword `true`",
+            U8 => "keyword `u8`",
             Underscore => "keyword `_`",
             Var => "keyword `var`",
             Void => "keyword `void`",
@@ -259,7 +262,7 @@ impl fmt::Display for Keyword {
 const _: () = assert!(std::mem::size_of::<Keyword>() == 1);
 
 impl Keyword {
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
 
     pub const VALUES: [Self; Self::COUNT] = [
         Self::Bool,
@@ -273,6 +276,7 @@ impl Keyword {
         Self::Return,
         Self::Struct,
         Self::True,
+        Self::U8,
         Self::Underscore,
         Self::Var,
         Self::Void,
@@ -292,6 +296,7 @@ impl Keyword {
             Self::Return => "return",
             Self::Struct => "struct",
             Self::True => "true",
+            Self::U8 => "u8",
             Self::Underscore => "_",
             Self::Var => "var",
             Self::Void => "void",

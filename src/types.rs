@@ -11,7 +11,14 @@ pub enum Ty {
     Void,
     Bool,
     I32,
+    U8,
     Pointer(TyId),
+}
+
+impl Ty {
+    fn is_pointer(&self) -> bool {
+        matches!(self, Ty::Pointer(_))
+    }
 }
 
 impl_handle! {
@@ -27,12 +34,16 @@ impl Types {
     pub const VOID: TyId = TyId(0);
     pub const BOOL: TyId = TyId(1);
     pub const I32: TyId = TyId(2);
+    pub const U8: TyId = TyId(3);
+    pub const STR: TyId = TyId(4);
 
     pub fn new() -> Self {
         let mut interner = Interner::new();
         interner.intern(Ty::Void);
         interner.intern(Ty::Bool);
         interner.intern(Ty::I32);
+        let u8_ty = interner.intern(Ty::U8);
+        interner.intern(Ty::Pointer(u8_ty));
         Self { interner }
     }
 
@@ -61,8 +72,12 @@ impl Types {
     }
 
     pub fn apply_bin(&mut self, bin_op: BinOp, lhs: TyId, rhs: TyId) -> Option<TyId> {
+        let lhs_ty = self.get(lhs);
+        let rhs_ty = self.get(rhs);
         match bin_op {
             BinOp::EqualTo | BinOp::NotEqualTo => (lhs == rhs).then_some(Types::BOOL),
+            BinOp::Add | BinOp::Sub if lhs_ty.is_pointer() && rhs == Types::I32 => Some(lhs),
+            BinOp::Add | BinOp::Sub if rhs_ty.is_pointer() && lhs == Types::I32 => Some(rhs),
             BinOp::Add
             | BinOp::Sub
             | BinOp::Mul
@@ -82,9 +97,6 @@ impl Types {
             BinOp::LogicalAnd | BinOp::LogicalOr => {
                 (lhs == rhs && lhs == Types::BOOL).then_some(Types::BOOL)
             }
-            BinOp::ArraySubscript => todo!("arrays"),
-            BinOp::MemberAccess => todo!("structs"),
-            BinOp::IndirectMemberAccess => todo!("structs"),
         }
     }
 }
@@ -101,9 +113,10 @@ impl<'p> fmt::Display for TyDisplay<'p> {
             Ty::Void => f.write_str("void"),
             Ty::Bool => f.write_str("bool"),
             Ty::I32 => f.write_str("i32"),
+            Ty::U8 => f.write_str("u8"),
             Ty::Pointer(pointee_id) => write!(
                 f,
-                "{}*",
+                "*{}",
                 TyDisplay {
                     id: *pointee_id,
                     hoarder: self.hoarder

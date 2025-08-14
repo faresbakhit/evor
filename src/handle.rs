@@ -52,13 +52,13 @@ macro_rules! impl_handle {
     (
         $(
             $(#[$attr:meta])*
-            $vis:vis struct $name:ident($type:ty);
+            $vis:vis struct $name:ident($inner_vis:vis $type:ty);
         )*
     ) => {
         $(
             $(#[$attr])*
             #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-            $vis struct $name($type);
+            $vis struct $name($inner_vis $type);
 
             impl $crate::handle::Handle for $name {
                 const NAME: &'static str = stringify!($name);

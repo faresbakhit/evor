@@ -31,7 +31,7 @@ pub struct Func {
 
 #[derive(Clone, Debug, Hash)]
 pub struct FuncDecl {
-    pub ident: IdentId,
+    pub name: IdentId,
     pub params: Vec<VarDecl>,
     pub ret_ty: TyId,
     pub span: Span,
@@ -160,9 +160,6 @@ pub enum BinOp {
     GreaterThan,
     LessThanOrEqualTo,
     GreaterThanOrEqualTo,
-    ArraySubscript,
-    MemberAccess,
-    IndirectMemberAccess,
 }
 
 impl fmt::Display for BinOp {
@@ -186,9 +183,6 @@ impl fmt::Display for BinOp {
             BinOp::GreaterThan => ">",
             BinOp::LessThanOrEqualTo => "<=",
             BinOp::GreaterThanOrEqualTo => ">=",
-            BinOp::ArraySubscript => "[]",
-            BinOp::MemberAccess => ".",
-            BinOp::IndirectMemberAccess => "->",
         };
         f.write_str(r)
     }
@@ -209,7 +203,6 @@ impl BinOp {
             BitwiseLeftShift | BitwiseRightShift => (15, 16),
             Add | Sub => (17, 18),
             Mul | Div | Rem => (19, 20),
-            ArraySubscript | MemberAccess | IndirectMemberAccess => (22, 23),
         }
     }
 
@@ -234,9 +227,6 @@ impl BinOp {
             Symbol::Greater => Some(GreaterThan),
             Symbol::LessEqual => Some(LessThanOrEqualTo),
             Symbol::GreaterEqual => Some(GreaterThanOrEqualTo),
-            Symbol::OpenBracket => Some(ArraySubscript),
-            Symbol::Dot => Some(MemberAccess),
-            Symbol::Arrow => Some(IndirectMemberAccess),
             _ => None,
         }
     }

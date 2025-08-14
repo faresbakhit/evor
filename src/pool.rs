@@ -5,7 +5,7 @@ use std::{marker::PhantomData, ops::Index};
 ///
 /// Also see:
 /// - [slotmap](https://docs.rs/slotmap/)
-#[derive(Default, Debug)]
+#[derive(Clone, PartialEq, Eq, Default, Debug, Hash)]
 pub struct Pool<T, H: Handle> {
     vec: Vec<T>,
     marker: PhantomData<H>,
